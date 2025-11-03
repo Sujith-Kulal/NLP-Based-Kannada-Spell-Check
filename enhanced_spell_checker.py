@@ -159,6 +159,26 @@ class EnhancedSpellChecker:
                     print(f"  {pos_tag} ({dir_name}): {len(words):,} words from {file_count} files")
                     total_words += len(words)
         
+        # Load extended dictionary from Excel files (if available)
+        extended_dict_path = 'extended_dictionary.pkl'
+        if os.path.exists(extended_dict_path):
+            try:
+                with open(extended_dict_path, 'rb') as f:
+                    extended_dict = pickle.load(f)
+                
+                excel_words = 0
+                for pos_tag, words in extended_dict.items():
+                    # Merge with existing paradigms
+                    for word, freq in words.items():
+                        if word not in self.pos_paradigms[pos_tag]:
+                            self.pos_paradigms[pos_tag][word] = freq
+                            excel_words += 1
+                
+                print(f"\n  📊 Extended dictionary loaded:")
+                print(f"     Added {excel_words:,} additional words from Excel files")
+            except Exception as e:
+                print(f"  ⚠️  Could not load extended dictionary: {e}")
+        
         # Create combined dictionary for fallback
         self.all_words = {}
         for pos_dict in self.pos_paradigms.values():
@@ -188,7 +208,7 @@ class EnhancedSpellChecker:
         """
         STEP 2: POS Tagging
         Uses your pos_tag/xlm-base-2 model
-        For now: rule-based fallback
+        For now: rule-based fallback with pronoun patterns
         """
         if self.pos_tagger:
             # Use actual model
@@ -197,14 +217,41 @@ class EnhancedSpellChecker:
         # Rule-based fallback POS tagging
         pos_tagged = []
         
+        # Pronoun stem patterns (from paradigm files)
+        pronoun_stems = [
+            'ivan', 'ival', 'ivar', 'iva', 'iv',  # ivanu, ivalu, ivaru (this person)
+            'avan', 'aval', 'avar', 'ava', 'av',  # avanu, avalu, avaru (that person)
+            'nAn', 'nAv', 'nIn', 'nIv',           # nAnu, nAvu, nInu, nIvu (I, we, you)
+            'wAn', 'wAv', 'Ad', 'ix', 'ex',       # wAnu, wAvu, Adu, ixu, exu (it)
+            'yAr', 'yAv', 'eV', 'A',              # yAru, yAvu, eVru (who, which)
+        ]
+        
+        # Verb suffixes (common verb endings)
+        verb_suffixes = ['ali', 'iri', 'udu', 'enu', 'aru', 'are', 'avu', 'ave', 
+                        'uwwA', 'uwaV', 'ida', 'ide', 'al', 'ir', 'uv']
+        
         for token in tokens:
-            # Simple heuristics for Kannada
+            # Check if word exists in specific paradigm
             if token in self.pos_paradigms.get('VB', {}):
                 pos = 'VB'
             elif token in self.pos_paradigms.get('PR', {}):
                 pos = 'PR'
             else:
+                # Use pattern matching for unknown words
                 pos = 'NN'  # Default to noun
+                
+                # Check pronoun patterns
+                for stem in pronoun_stems:
+                    if token.startswith(stem):
+                        pos = 'PR'
+                        break
+                
+                # Check verb patterns (if not already tagged as PR)
+                if pos == 'NN':
+                    for suffix in verb_suffixes:
+                        if token.endswith(suffix):
+                            pos = 'VB'
+                            break
             
             pos_tagged.append((token, pos))
         
@@ -244,19 +291,14 @@ class EnhancedSpellChecker:
         Check if word exists in paradigm for given POS tag
         Returns: (is_correct, suggestions)
         """
-        # Get paradigm for this POS tag
-        paradigm = self.pos_paradigms.get(pos_tag, {})
-        
-        # If no specific paradigm, use all words
-        if not paradigm:
-            paradigm = self.all_words
-        
-        # Check if word exists
-        if word in paradigm:
+        # Check if word exists in ALL paradigms first
+        if word in self.all_words:
             return True, []
         
-        # Word not found - get suggestions
-        suggestions = self.get_suggestions(word, paradigm, max_suggestions=5)
+        # Word not found - get suggestions from ALL paradigms (cross-POS)
+        # This ensures we don't miss suggestions from other POS categories
+        suggestions = self.get_suggestions(word, self.all_words, max_suggestions=10)
+        
         return False, suggestions
     
     def levenshtein_distance(self, s1, s2):
@@ -279,17 +321,18 @@ class EnhancedSpellChecker:
         
         return previous_row[-1]
     
-    def get_suggestions(self, word, paradigm, max_suggestions=5, max_distance=2):
+    def get_suggestions(self, word, paradigm, max_suggestions=10, max_distance=3):
         """
         STEP 5: Edit Distance Suggestions
         Get spelling suggestions from paradigm
+        Increased to edit distance 3 for better suggestions
         """
         suggestions = []
         
-        # Filter candidates by length (optimization)
+        # Filter candidates by length (more lenient)
         candidates = [
             w for w in paradigm.keys()
-            if abs(len(w) - len(word)) <= max_distance
+            if abs(len(w) - len(word)) <= max_distance + 1
         ]
         
         # Calculate distances

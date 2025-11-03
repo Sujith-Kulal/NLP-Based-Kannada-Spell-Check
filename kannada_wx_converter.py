@@ -116,23 +116,124 @@ def wx_to_kannada(text):
         >>> wx_to_kannada("huduga")
         'ಹುಡುಗ'
     """
-    # Simple reverse mapping (basic implementation)
-    # For production, you'd need a more sophisticated parser
+    # Map WX consonants (without inherent 'a')
+    consonants = {
+        'k': 'ಕ', 'K': 'ಖ', 'g': 'ಗ', 'G': 'ಘ', 'f': 'ಙ',
+        'c': 'ಚ', 'C': 'ಛ', 'j': 'ಜ', 'J': 'ಝ', 'F': 'ಞ',
+        't': 'ಟ', 'T': 'ಠ', 'd': 'ಡ', 'D': 'ಢ', 'N': 'ಣ',
+        'w': 'ತ', 'W': 'ಥ', 'x': 'ದ', 'X': 'ಧ', 'n': 'ನ',
+        'p': 'ಪ', 'P': 'ಫ', 'b': 'ಬ', 'B': 'ಭ', 'm': 'ಮ',
+        'y': 'ಯ', 'r': 'ರ', 'l': 'ಲ', 'L': 'ಳ',
+        'v': 'ವ', 'S': 'ಶ', 'R': 'ಷ', 's': 'ಸ', 'h': 'ಹ',
+    }
+    
+    # Map WX vowels (independent)
+    independent_vowels = {
+        'a': 'ಅ', 'A': 'ಆ', 'i': 'ಇ', 'I': 'ಈ', 'u': 'ಉ', 'U': 'ಊ',
+        'q': 'ಋ', 'Q': 'ೠ', 'e': 'ಎ', 'E': 'ಐ',
+        'o': 'ಒ', 'O': 'ಔ',
+    }
+    
+    # Map WX vowel signs (dependent - added to consonants)
+    vowel_signs = {
+        'A': 'ಾ', 'i': 'ಿ', 'I': 'ೀ', 'u': 'ು', 'U': 'ೂ',
+        'q': 'ೃ', 'Q': 'ೄ', 'e': 'ೆ', 'E': 'ೈ',
+        'o': 'ೊ', 'O': 'ೌ',
+    }
+    
+    # Special patterns
+    special_patterns = {
+        'eV': 'ೇ',   # ē vowel sign
+        'oV': 'ೋ',   # ō vowel sign
+        'lY': 'ಳ',   # retroflex l
+        'rY': 'ಱ',   # special r
+    }
+    
     result = []
     i = 0
     
     while i < len(text):
-        # Try two-character matches first
-        if i + 1 < len(text):
-            two_char = text[i:i+2]
-            if two_char in WX_TO_KANNADA:
-                result.append(WX_TO_KANNADA[two_char])
-                i += 2
-                continue
+        # Try special patterns first (2-3 chars)
+        matched = False
+        for pattern_len in [3, 2]:
+            if i + pattern_len <= len(text):
+                pattern = text[i:i+pattern_len]
+                if pattern in special_patterns:
+                    result.append(special_patterns[pattern])
+                    i += pattern_len
+                    matched = True
+                    break
         
-        # Single character
+        if matched:
+            continue
+        
         char = text[i]
-        result.append(WX_TO_KANNADA.get(char, char))
+        
+        # Check if it's a consonant
+        if char in consonants:
+            # Look ahead for vowel
+            if i + 1 < len(text):
+                next_char = text[i + 1]
+                
+                # Check for two-char vowel patterns (eV, oV)
+                if i + 2 < len(text):
+                    two_char_vowel = text[i+1:i+3]
+                    if two_char_vowel in ['eV', 'oV']:
+                        # Consonant + long vowel
+                        result.append(consonants[char])
+                        result.append(special_patterns[two_char_vowel])
+                        i += 3
+                        continue
+                
+                # Check for single-char vowel sign
+                if next_char in vowel_signs:
+                    # Consonant + vowel sign
+                    result.append(consonants[char])
+                    result.append(vowel_signs[next_char])
+                    i += 2
+                    continue
+                elif next_char == 'a':
+                    # Consonant + inherent 'a' (just the consonant)
+                    result.append(consonants[char])
+                    i += 2
+                    continue
+                elif next_char in consonants:
+                    # Consonant + consonant = add virama
+                    result.append(consonants[char])
+                    result.append('್')  # Virama/halant
+                    i += 1
+                    continue
+            
+            # Consonant at end of word = add virama
+            if i == len(text) - 1:
+                result.append(consonants[char])
+                result.append('್')
+                i += 1
+                continue
+            
+            # Default: consonant with inherent 'a'
+            result.append(consonants[char])
+            i += 1
+            continue
+        
+        # Check if it's an independent vowel
+        if char in independent_vowels:
+            result.append(independent_vowels[char])
+            i += 1
+            continue
+        
+        # Special characters
+        if char == 'M':
+            result.append('ಂ')  # Anusvara
+            i += 1
+            continue
+        elif char == 'H':
+            result.append('ಃ')  # Visarga
+            i += 1
+            continue
+        
+        # Default: keep character as-is
+        result.append(char)
         i += 1
     
     return ''.join(result)

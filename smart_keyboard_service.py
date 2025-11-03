@@ -105,6 +105,9 @@ class SmartKeyboardService:
         if not any(self.is_kannada_char(c) for c in word):
             return False, word
         
+        # Track that original was Kannada
+        was_kannada = is_kannada_text(word)
+        
         # Check word using spell checker
         try:
             errors = self.spell_checker.check_text(word)
@@ -114,8 +117,15 @@ class SmartKeyboardService:
                 suggestions = error.get('suggestions', [])
                 
                 if suggestions and len(suggestions) > 0:
-                    # Return first (best) suggestion
-                    return True, suggestions[0]
+                    # Get first (best) suggestion (in WX format)
+                    suggestion = suggestions[0]
+                    
+                    # Convert WX suggestion back to Kannada if original was Kannada
+                    if was_kannada:
+                        from kannada_wx_converter import wx_to_kannada
+                        suggestion = wx_to_kannada(suggestion)
+                    
+                    return True, suggestion
         except Exception as e:
             pass
         
