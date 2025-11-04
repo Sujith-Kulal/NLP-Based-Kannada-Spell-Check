@@ -131,7 +131,7 @@ class SmartKeyboardService:
         
         return False, word
     
-    def perform_correction(self, original, corrected):
+    def perform_correction(self, original, corrected, delimiter=' '):
         """
         Replace the current word with corrected version
         Uses backspace + type simulation
@@ -139,18 +139,40 @@ class SmartKeyboardService:
         try:
             # Wait a tiny bit for the delimiter to be processed
             time.sleep(0.05)
-            
-            # Backspace to delete original word + delimiter
-            for _ in range(len(original) + 1):
+
+            # Remove the delimiter the user just typed (space, newline, punctuation)
+            if delimiter:
                 self.keyboard_controller.press(Key.backspace)
                 self.keyboard_controller.release(Key.backspace)
                 time.sleep(0.01)
-            
-            # Type corrected word + space
-            time.sleep(0.05)
+
+            # Select the previous word using Ctrl+Shift+Left so composed glyphs are captured
+            self.keyboard_controller.press(Key.ctrl)
+            self.keyboard_controller.press(Key.shift)
+            self.keyboard_controller.press(Key.left)
+            self.keyboard_controller.release(Key.left)
+            self.keyboard_controller.release(Key.shift)
+            self.keyboard_controller.release(Key.ctrl)
+            time.sleep(0.01)
+
+            # Delete the selected word
+            self.keyboard_controller.press(Key.delete)
+            self.keyboard_controller.release(Key.delete)
+            time.sleep(0.02)
+
+            # Type corrected word
             self.keyboard_controller.type(corrected)
-            self.keyboard_controller.press(Key.space)
-            self.keyboard_controller.release(Key.space)
+            time.sleep(0.01)
+
+            # Re-insert the original delimiter
+            if delimiter == ' ':
+                self.keyboard_controller.press(Key.space)
+                self.keyboard_controller.release(Key.space)
+            elif delimiter == '\n':
+                self.keyboard_controller.press(Key.enter)
+                self.keyboard_controller.release(Key.enter)
+            else:
+                self.keyboard_controller.type(delimiter)
             
             self.corrections_made += 1
             
@@ -179,7 +201,7 @@ class SmartKeyboardService:
                     
                     if should_correct and corrected != word:
                         # Perform auto-correction
-                        self.perform_correction(word, corrected)
+                        self.perform_correction(word, corrected, delimiter=char)
                 
                 # Reset word buffer
                 self.current_word = []

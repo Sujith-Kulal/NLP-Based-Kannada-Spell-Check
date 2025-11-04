@@ -84,6 +84,18 @@ def tokenize(list_s):
     return tkns
 
 
+def tokenize_sentence(text, lang='kn'):
+    """Compatibility wrapper expected by EnhancedSpellChecker."""
+    if isinstance(text, (list, tuple)):
+        return tokenize(list(text))
+
+    try:
+        parts = str(text).split()
+        return tokenize(parts)
+    except Exception:
+        return []
+
+
 def read_file_and_tokenize(input_file, output_file, lang_type):
     """Read file and tokenize."""
     string_sentences = ''

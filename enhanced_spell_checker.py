@@ -291,15 +291,99 @@ class EnhancedSpellChecker:
         Check if word exists in paradigm for given POS tag
         Returns: (is_correct, suggestions)
         """
-        # Check if word exists in ALL paradigms first
-        if word in self.all_words:
+        # Strict category check: only mark correct if the word is present under its POS
+        if pos_tag in self.pos_paradigms and word in self.pos_paradigms[pos_tag]:
             return True, []
-        
-        # Word not found - get suggestions from ALL paradigms (cross-POS)
-        # This ensures we don't miss suggestions from other POS categories
-        suggestions = self.get_suggestions(word, self.all_words, max_suggestions=10)
-        
+
+        # Start with category-scoped suggestions
+        same_pos_candidates = self.pos_paradigms.get(pos_tag, {})
+        suggestions = self.get_suggestions(word, same_pos_candidates, max_suggestions=10)
+
+        # Pronoun-specific bridging to keep i-/a- stems aligned with paradigm data
+        if pos_tag == 'PR':
+            bridged = self._pronoun_bridge_suggestions(word)
+            if bridged:
+                seen = set()
+                ordered = []
+                for candidate in bridged + suggestions:
+                    if candidate not in seen:
+                        ordered.append(candidate)
+                        seen.add(candidate)
+                suggestions = ordered[:10]
+
+        # Backfill with cross-POS suggestions only if we still need more options
+        if len(suggestions) < 10:
+            remaining = 10 - len(suggestions)
+            cross_pos = self.get_suggestions(word, self.all_words, max_suggestions=remaining)
+            cross_pos = [w for w in cross_pos if w not in suggestions]
+            suggestions.extend(cross_pos)
+
         return False, suggestions
+
+    def _pronoun_bridge_suggestions(self, word):
+        """Generate pronoun suggestions that respect i↔a stem swaps while
+        preserving suffix expectations such as ali↔alli."""
+        pr_dict = self.pos_paradigms.get('PR', {})
+        if not word or not pr_dict:
+            return []
+
+        from itertools import count
+
+        ranking = {}
+        order_counter = count()
+
+        def add_candidate(value, priority):
+            if not value:
+                return
+            if value in ranking:
+                current_priority, order = ranking[value]
+                if priority < current_priority:
+                    ranking[value] = (priority, order)
+            else:
+                ranking[value] = (priority, next(order_counter))
+
+        original_prefix = 'i' if word.startswith('i') else 'a' if word.startswith('a') else None
+        swap_prefix = None
+        if original_prefix == 'i':
+            swap_prefix = 'a'
+        elif original_prefix == 'a':
+            swap_prefix = 'i'
+
+        # Handle common ali↔alli toggles when the swapped form exists in paradigms
+        suffix_pairs = [('ali', 'alli'), ('alli', 'ali')]
+        for src_suffix, dst_suffix in suffix_pairs:
+            if word.endswith(src_suffix):
+                alt_form = word[:-len(src_suffix)] + dst_suffix
+                swapped_alt = None
+                if swap_prefix and len(word) > 1:
+                    swapped_alt = swap_prefix + word[1:-len(src_suffix)] + dst_suffix
+                if swapped_alt and swapped_alt in pr_dict:
+                    add_candidate(alt_form, 0)
+                elif alt_form in pr_dict:
+                    add_candidate(alt_form, 0)
+
+        # Look at the swapped stem inside PR dictionary and project suggestions back
+        if swap_prefix and len(word) > 1:
+            swapped_word = swap_prefix + word[1:]
+            if swapped_word in pr_dict:
+                add_candidate(swapped_word, 2)
+
+            # Pull suggestions for the swapped word within the pronoun dictionary
+            swapped_suggestions = self.get_suggestions(swapped_word, pr_dict, max_suggestions=10)
+            for suggestion in swapped_suggestions:
+                add_candidate(suggestion, 3)
+                if suggestion.startswith(swap_prefix):
+                    reverted = original_prefix + suggestion[1:] if original_prefix else suggestion
+                    add_candidate(reverted, 1)
+
+        # If we are still short on ideas, fall back to edit distance within PR
+        if len(ranking) < 5:
+            backup = self.get_suggestions(word, pr_dict, max_suggestions=5)
+            for suggestion in backup:
+                add_candidate(suggestion, 4)
+
+        ordered = [value for value, _ in sorted(ranking.items(), key=lambda item: (item[1][0], item[1][1]))]
+        return ordered
     
     def levenshtein_distance(self, s1, s2):
         """Calculate Levenshtein edit distance"""
