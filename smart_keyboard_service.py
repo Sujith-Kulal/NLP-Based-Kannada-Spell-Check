@@ -31,6 +31,8 @@ import tkinter as tk
 from ctypes import wintypes
 from win32api import GetCursorPos
 import signal
+import win32clipboard
+import re
 
 # Add project paths
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -175,6 +177,8 @@ class SmartKeyboardService:
         self.running = False  # Service running flag
         self.replacing = False  # Flag to prevent re-showing popup during replacement
         self.last_esc_time = 0  # Track last Esc press for double-tap detection
+        self.last_clipboard_content = ""  # Track clipboard for paste detection
+        self.clipboard_check_active = False  # Flag to enable clipboard monitoring
 
         print("\n✅ Smart Keyboard Service initialized!")
         print("\n📝 Controls:")
@@ -183,7 +187,7 @@ class SmartKeyboardService:
         print("   Enter / Click: Replace word with selected suggestion")
         print("   Esc (popup)  : Hide suggestions")
         print("   Esc (twice)  : Stop the service")
-        print("\n🚀 Service running... Type Kannada text in any app to see suggestions!")
+        print("\n🚀 Service running... Type or paste Kannada text in any app to see suggestions!")
         print("="*70 + "\n")
         print("💡 TIP: Press Esc twice quickly to stop the service cleanly")
     
@@ -196,6 +200,66 @@ class SmartKeyboardService:
     def is_kannada_char(self, char):
         """Check if character is Kannada"""
         return char and '\u0C80' <= char <= '\u0CFF'
+    
+    def get_clipboard_text(self):
+        """Get text from clipboard safely"""
+        try:
+            win32clipboard.OpenClipboard()
+            try:
+                if win32clipboard.IsClipboardFormatAvailable(win32clipboard.CF_UNICODETEXT):
+                    data = win32clipboard.GetClipboardData(win32clipboard.CF_UNICODETEXT)
+                    return data
+            finally:
+                win32clipboard.CloseClipboard()
+        except Exception:
+            pass
+        return None
+    
+    def extract_words_from_text(self, text):
+        """Extract words from pasted text"""
+        if not text:
+            return []
+        # Split by delimiters while preserving Kannada words
+        words = re.findall(r'[^\s\n\r\t.,!?;:]+', text)
+        return [w for w in words if any(self.is_kannada_char(c) for c in w)]
+    
+    def check_pasted_text(self):
+        """Check if text was pasted and show suggestions for last word"""
+        try:
+            clipboard_text = self.get_clipboard_text()
+            print(f"🔍 Clipboard content: {repr(clipboard_text)}")
+            
+            if not clipboard_text:
+                print("⚠️ No clipboard text found")
+                return
+                
+            # Always update clipboard content
+            self.last_clipboard_content = clipboard_text
+            
+            # Extract Kannada words from pasted text
+            words = self.extract_words_from_text(clipboard_text)
+            print(f"🔍 Extracted Kannada words: {words}")
+            
+            if words and self.enabled and not self.replacing:
+                # Check the last word pasted
+                last_pasted_word = words[-1]
+                self.last_word = last_pasted_word
+                print(f"🔍 Checking last pasted word: '{last_pasted_word}'")
+                suggestions = self.get_suggestions(last_pasted_word)
+                print(f"🔍 Suggestions found: {suggestions}")
+                
+                if suggestions:
+                    print(f"✅ Showing suggestions for pasted word: '{last_pasted_word}'")
+                    self.popup.show(suggestions)
+                else:
+                    print(f"ℹ️ No suggestions for: '{last_pasted_word}'")
+                    self.popup.hide()
+            else:
+                print(f"⚠️ No Kannada words found or service disabled")
+        except Exception as e:
+            print(f"❌ Error checking pasted text: {e}")
+            import traceback
+            traceback.print_exc()
     
     def get_suggestions(self, word):
         """Return suggestion list for a word"""
@@ -265,6 +329,24 @@ class SmartKeyboardService:
             # Skip processing if we're in the middle of replacing
             if self.replacing:
                 return
+            
+            # Detect Ctrl+V paste operation
+            if key == Key.ctrl_l or key == Key.ctrl_r:
+                self.clipboard_check_active = True
+            elif self.clipboard_check_active:
+                # Check if 'v' key is pressed (either as char or vk code)
+                is_v_key = False
+                if hasattr(key, 'char') and key.char and key.char.lower() == 'v':
+                    is_v_key = True
+                elif hasattr(key, 'vk') and key.vk == 86:  # VK code for 'V'
+                    is_v_key = True
+                
+                if is_v_key:
+                    # Ctrl+V detected - schedule clipboard check after paste completes
+                    print("📋 Paste detected - checking clipboard...")
+                    threading.Timer(0.3, self.check_pasted_text).start()
+                
+                self.clipboard_check_active = False
             
             # Handle Esc key - hide popup or exit if pressed twice quickly
             if key == Key.esc:
@@ -346,7 +428,10 @@ class SmartKeyboardService:
             pass
     
     def on_release(self, key):
-        pass
+        """Handle key release events"""
+        # Reset clipboard check flag when Ctrl is released
+        if key == Key.ctrl_l or key == Key.ctrl_r:
+            self.clipboard_check_active = False
     
     def toggle_enabled(self):
         """Toggle suggestion mode"""
