@@ -1,24 +1,25 @@
 #!/usr/bin/env python3
 """
-Kannada Smart Keyboard Service (Phase 2 - Background Auto-Correct Prototype)
+Kannada Smart Keyboard Service (Phase 2 - Suggestion Popup Prototype)
 ==============================================================================
 
-This service monitors keyboard input system-wide and auto-corrects Kannada text
-in real-time using your existing NLP spell-checker.
+This service monitors keyboard input system-wide and shows Kannada
+word suggestions instead of auto-correcting automatically.
 
 Features:
-- Monitors keyboard input using Windows hooks
-- Detects word boundaries (space, punctuation)
-- Auto-corrects misspelled Kannada words
-- Works in ANY application (Notepad, Word, Browser, etc.)
+- Shows Kannada spelling suggestions in a popup box
+- Works in any app (Notepad, Word, Browser)
+- Uses keyboard hooks for input capture
+- You choose whether to insert a suggestion (not auto-correct)
 
 Requirements:
     pip install pywin32 pynput
+    (Tkinter is built-in with Python)
 
 Usage:
     python smart_keyboard_service.py
 
-Press Ctrl+Shift+K to toggle auto-correct ON/OFF
+Press Ctrl+Shift+K to toggle suggestion feature ON/OFF
 Press Ctrl+C to exit
 """
 
@@ -26,9 +27,10 @@ import sys
 import os
 import time
 import threading
-from collections import deque
-import ctypes
+import tkinter as tk
 from ctypes import wintypes
+from win32api import GetCursorPos
+import signal
 
 # Add project paths
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -37,12 +39,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from enhanced_spell_checker import EnhancedSpellChecker
 from kannada_wx_converter import is_kannada_text
 
-# Windows keyboard hooks
 try:
-    import win32api
-    import win32con
-    import win32gui
-    import win32clipboard
     from pynput import keyboard
     from pynput.keyboard import Key, Controller
 except ImportError:
@@ -51,102 +48,188 @@ except ImportError:
     sys.exit(1)
 
 
-class SmartKeyboardService:
-    """
-    Background service that monitors keyboard input and auto-corrects Kannada words
-    """
+# ---------------------------------------------------------------------------
+# Suggestion Popup UI (Tkinter overlay window)
+# ---------------------------------------------------------------------------
+class SuggestionPopup:
+    """Floating popup that shows Kannada word suggestions"""
+    def __init__(self, on_selection_callback=None, on_close_callback=None):
+        self.root = tk.Tk()
+        self.root.overrideredirect(True)
+        self.root.attributes('-topmost', True)
+        self.root.withdraw()
+        self.suggestions = []
+        self.selected = 0
+        self.visible = False
+        self.on_selection_callback = on_selection_callback
+        self.on_close_callback = on_close_callback
+
+        # Handle window close
+        self.root.protocol("WM_DELETE_WINDOW", self._on_window_close)
+
+        # Add frame for border
+        frame = tk.Frame(self.root, bg='#0078D7', bd=1)
+        frame.pack(fill='both', expand=True)
+
+        self.listbox = tk.Listbox(
+            frame, font=('Nirmala UI', 14),
+            height=6, width=20, bg='white', fg='black',
+            selectbackground='#0078D7', selectforeground='white',
+            highlightthickness=0, relief='flat', cursor='hand2'
+        )
+        self.listbox.pack(padx=1, pady=1)
+        
+        # Bind mouse click event
+        self.listbox.bind('<ButtonRelease-1>', self._on_click)
+        self.listbox.bind('<Motion>', self._on_hover)
+
+    def show(self, suggestions):
+        """Show popup near cursor"""
+        if not suggestions:
+            return
+        self.suggestions = suggestions
+        self.selected = 0
+        self.listbox.delete(0, tk.END)
+        for s in suggestions:
+            self.listbox.insert(tk.END, s)
+        self.listbox.select_set(0)
+        self.listbox.activate(0)
+        x, y = GetCursorPos()
+        self.root.geometry(f"+{x+10}+{y+20}")
+        self.root.deiconify()
+        self.visible = True
+        self.root.lift()
+        self.root.focus_force()
+
+    def hide(self):
+        self.root.withdraw()
+        self.visible = False
+
+    def select_next(self):
+        if not self.visible or not self.suggestions:
+            return
+        self.selected = (self.selected + 1) % len(self.suggestions)
+        self.listbox.select_clear(0, tk.END)
+        self.listbox.select_set(self.selected)
+        self.listbox.activate(self.selected)
+
+    def select_prev(self):
+        if not self.visible or not self.suggestions:
+            return
+        self.selected = (self.selected - 1) % len(self.suggestions)
+        self.listbox.select_clear(0, tk.END)
+        self.listbox.select_set(self.selected)
+        self.listbox.activate(self.selected)
+
+    def get_selected(self):
+        if not self.visible or not self.suggestions:
+            return None
+        return self.suggestions[self.selected]
     
+    def _on_click(self, event):
+        """Handle mouse click on suggestion"""
+        index = self.listbox.nearest(event.y)
+        if 0 <= index < len(self.suggestions):
+            self.selected = index
+            word = self.suggestions[self.selected]
+            self.hide()
+            if self.on_selection_callback:
+                self.on_selection_callback(word)
+    
+    def _on_hover(self, event):
+        """Highlight suggestion on mouse hover"""
+        index = self.listbox.nearest(event.y)
+        if 0 <= index < len(self.suggestions):
+            self.listbox.select_clear(0, tk.END)
+            self.listbox.select_set(index)
+            self.listbox.activate(index)
+            self.selected = index
+    
+    def _on_window_close(self):
+        """Handle window close event"""
+        if self.on_close_callback:
+            self.on_close_callback()
+
+
+# ---------------------------------------------------------------------------
+# Smart Keyboard Service
+# ---------------------------------------------------------------------------
+class SmartKeyboardService:
+    """Background service for Kannada word suggestion"""
     def __init__(self):
         print("\n" + "="*70)
-        print("🎯 Kannada Smart Keyboard Service - Phase 2 Prototype")
+        print("🎯 Kannada Smart Keyboard Service - Suggestion Mode")
         print("="*70)
         
         self.spell_checker = EnhancedSpellChecker()
         self.keyboard_controller = Controller()
+        self.popup = SuggestionPopup(
+            on_selection_callback=self.replace_word,
+            on_close_callback=self.on_popup_close
+        )
         
-        # Current word buffer
         self.current_word = []
         self.enabled = True
-        self.last_correction_time = 0
-        
-        # Statistics
-        self.corrections_made = 0
         self.words_checked = 0
-        
+        self.last_word = ""  # Store last word for replacement
+        self.running = False  # Service running flag
+        self.replacing = False  # Flag to prevent re-showing popup during replacement
+
         print("\n✅ Smart Keyboard Service initialized!")
         print("\n📝 Controls:")
-        print("   Ctrl+Shift+K : Toggle auto-correct ON/OFF")
-        print("   Ctrl+C       : Exit service")
-        print("\n🚀 Service is now running...")
-        print("   Type Kannada text in any application to see auto-correction!")
+        print("   Ctrl+Shift+K : Toggle suggestions ON/OFF")
+        print("   ↑ / ↓        : Navigate suggestions")
+        print("   Enter / Click: Replace word with selected suggestion")
+        print("   Esc          : Hide suggestions")
+        print("   Ctrl+C       : Exit service (Press in terminal or this window)")
+        print("\n🚀 Service running... Type Kannada text in any app to see suggestions!")
         print("="*70 + "\n")
+        print("💡 TIP: Press Ctrl+C in the terminal window to exit cleanly")
     
     def is_word_delimiter(self, char):
         """Check if character is a word boundary"""
         if not char:
             return True
-        return char in [' ', '\n', '\r', '\t', '.', ',', '!', '?', ';', ':', '-', '(', ')', '[', ']', '{', '}']
-    
+        return char in [' ', '\n', '\r', '\t', '.', ',', '!', '?', ';', ':']
+
     def is_kannada_char(self, char):
         """Check if character is Kannada"""
-        if not char:
-            return False
-        return '\u0C80' <= char <= '\u0CFF'
+        return char and '\u0C80' <= char <= '\u0CFF'
     
-    def get_auto_correction(self, word):
-        """
-        Get auto-correction suggestion for a word
-        Returns: (should_correct, corrected_word)
-        """
+    def get_suggestions(self, word):
+        """Return suggestion list for a word"""
         if not word or len(word) < 2:
-            return False, word
-        
-        # Only check Kannada words
+            return []
         if not any(self.is_kannada_char(c) for c in word):
-            return False, word
-        
-        # Track that original was Kannada
+            return []
         was_kannada = is_kannada_text(word)
-        
-        # Check word using spell checker
         try:
             errors = self.spell_checker.check_text(word)
-            
-            if errors and len(errors) > 0:
+            if errors:
                 error = errors[0]
                 suggestions = error.get('suggestions', [])
-                
-                if suggestions and len(suggestions) > 0:
-                    # Get first (best) suggestion (in WX format)
-                    suggestion = suggestions[0]
-                    
-                    # Convert WX suggestion back to Kannada if original was Kannada
-                    if was_kannada:
-                        from kannada_wx_converter import wx_to_kannada
-                        suggestion = wx_to_kannada(suggestion)
-                    
-                    return True, suggestion
-        except Exception as e:
+                if was_kannada:
+                    from kannada_wx_converter import wx_to_kannada
+                    suggestions = [wx_to_kannada(s) for s in suggestions]
+                return suggestions[:5]
+        except Exception:
             pass
-        
-        return False, word
+        return []
     
-    def perform_correction(self, original, corrected, delimiter=' '):
-        """
-        Replace the current word with corrected version
-        Uses backspace + type simulation
-        """
+    def replace_word(self, chosen_word):
+        """Replace the misspelled word with chosen suggestion"""
         try:
-            # Wait a tiny bit for the delimiter to be processed
+            print(f"✅ Replacing with: '{chosen_word}'")
+            self.replacing = True  # Set flag to prevent re-triggering
+            self.popup.hide()  # Ensure popup is hidden
             time.sleep(0.05)
-
-            # Remove the delimiter the user just typed (space, newline, punctuation)
-            if delimiter:
-                self.keyboard_controller.press(Key.backspace)
-                self.keyboard_controller.release(Key.backspace)
-                time.sleep(0.01)
-
-            # Select the previous word using Ctrl+Shift+Left so composed glyphs are captured
+            
+            # Remove the delimiter (space) that triggered the suggestion
+            self.keyboard_controller.press(Key.backspace)
+            self.keyboard_controller.release(Key.backspace)
+            time.sleep(0.01)
+            
+            # Select the previous word using Ctrl+Shift+Left
             self.keyboard_controller.press(Key.ctrl)
             self.keyboard_controller.press(Key.shift)
             self.keyboard_controller.press(Key.left)
@@ -154,37 +237,53 @@ class SmartKeyboardService:
             self.keyboard_controller.release(Key.shift)
             self.keyboard_controller.release(Key.ctrl)
             time.sleep(0.01)
-
+            
             # Delete the selected word
             self.keyboard_controller.press(Key.delete)
             self.keyboard_controller.release(Key.delete)
             time.sleep(0.02)
-
-            # Type corrected word
-            self.keyboard_controller.type(corrected)
+            
+            # Type the chosen word
+            self.keyboard_controller.type(chosen_word)
             time.sleep(0.01)
-
-            # Re-insert the original delimiter
-            if delimiter == ' ':
-                self.keyboard_controller.press(Key.space)
-                self.keyboard_controller.release(Key.space)
-            elif delimiter == '\n':
-                self.keyboard_controller.press(Key.enter)
-                self.keyboard_controller.release(Key.enter)
-            else:
-                self.keyboard_controller.type(delimiter)
             
-            self.corrections_made += 1
+            # Add space after the word
+            self.keyboard_controller.press(Key.space)
+            self.keyboard_controller.release(Key.space)
+            time.sleep(0.05)
             
-            print(f"✅ Auto-corrected: '{original}' → '{corrected}'")
+            self.replacing = False  # Reset flag after replacement complete
             
         except Exception as e:
-            print(f"⚠️  Correction failed: {e}")
-    
+            print(f"⚠️ Replacement failed: {e}")
+            self.replacing = False
+
     def on_press(self, key):
         """Handle key press events"""
         try:
-            # Get character
+            # Skip processing if we're in the middle of replacing
+            if self.replacing:
+                return
+            
+            # Navigation controls for popup
+            if self.popup.visible:
+                if key == Key.down:
+                    self.popup.select_next()
+                    return
+                elif key == Key.up:
+                    self.popup.select_prev()
+                    return
+                elif key == Key.enter:
+                    chosen = self.popup.get_selected()
+                    if chosen:
+                        self.popup.hide()
+                        self.replace_word(chosen)
+                    return
+                elif key == Key.esc:
+                    self.popup.hide()
+                    return
+
+            # Handle normal characters
             char = None
             if hasattr(key, 'char'):
                 char = key.char
@@ -194,113 +293,142 @@ class SmartKeyboardService:
                 char = '\n'
             elif key == Key.tab:
                 char = '\t'
-            
-            # Check if it's a delimiter (space, enter, punctuation)
+
             if char and self.is_word_delimiter(char):
-                # Word boundary reached - check if we should correct
-                if self.current_word and self.enabled:
+                # ✅ ALWAYS check and hide popup, even if word is empty
+                if self.current_word and self.enabled and not self.replacing:
                     word = ''.join(self.current_word)
+                    self.last_word = word  # Store the word for replacement
                     self.words_checked += 1
-                    
-                    # Get correction suggestion
-                    should_correct, corrected = self.get_auto_correction(word)
-                    
-                    if should_correct and corrected != word:
-                        # Perform auto-correction
-                        self.perform_correction(word, corrected, delimiter=char)
-                
-                # Reset word buffer
+                    suggestions = self.get_suggestions(word)
+                    if suggestions:
+                        self.popup.show(suggestions)
+                    else:
+                        self.popup.hide()
+                else:
+                    # ✅ Hide popup if no word was typed (multiple spaces, etc.)
+                    self.popup.hide()
                 self.current_word = []
-            
-            # Add character to current word
             elif char:
+                # ✅ Hide popup while actively typing a new word
+                if self.popup.visible:
+                    self.popup.hide()
                 self.current_word.append(char)
-                
-                # Limit buffer size
                 if len(self.current_word) > 50:
                     self.current_word = self.current_word[-50:]
-        
-        except Exception as e:
+        except Exception:
             pass
     
     def on_release(self, key):
-        """Handle key release events"""
         pass
     
     def toggle_enabled(self):
-        """Toggle auto-correct on/off"""
+        """Toggle suggestion mode"""
         self.enabled = not self.enabled
         status = "ENABLED ✅" if self.enabled else "DISABLED ⛔"
-        print(f"\n🔄 Auto-correct {status}")
-        
-        # Show Windows notification
-        try:
-            from plyer import notification
-            notification.notify(
-                title="Kannada Smart Keyboard",
-                message=f"Auto-correct {status}",
-                timeout=2
-            )
-        except:
-            pass
+        print(f"\n🔄 Suggestion mode {status}")
+        if not self.enabled:
+            self.popup.hide()
+    
+    def on_popup_close(self):
+        """Handle popup window close"""
+        self.running = False
+        print("\n🛑 Exiting service...")
     
     def run(self):
         """Start the keyboard monitoring service"""
-        # Create hotkey listener for Ctrl+Shift+K
+        self.running = True
+        
         def on_activate_toggle():
             self.toggle_enabled()
         
+        def on_exit():
+            """Handle Ctrl+C to exit"""
+            print("\n🛑 Stopping service...")
+            self.running = False
+            self.popup.hide()
+            self.popup.root.quit()
+        
         from pynput import keyboard as kb
         
-        # Setup global hotkey
-        hotkey = kb.HotKey(
+        # Setup hotkeys
+        toggle_hotkey = kb.HotKey(
             kb.HotKey.parse('<ctrl>+<shift>+k'),
             on_activate_toggle
         )
         
-        # Create keyboard listener
+        exit_hotkey = kb.HotKey(
+            kb.HotKey.parse('<ctrl>+c'),
+            on_exit
+        )
+        
         def for_canonical(f):
             return lambda k: f(listener.canonical(k))
         
-        listener = kb.Listener(
-            on_press=lambda k: (for_canonical(hotkey.press)(k), self.on_press(k)),
-            on_release=lambda k: (for_canonical(hotkey.release)(k), self.on_release(k))
-        )
+        def on_key_press(key):
+            for_canonical(toggle_hotkey.press)(key)
+            for_canonical(exit_hotkey.press)(key)
+            if self.running:
+                self.on_press(key)
+        
+        def on_key_release(key):
+            for_canonical(toggle_hotkey.release)(key)
+            for_canonical(exit_hotkey.release)(key)
+            if self.running:
+                self.on_release(key)
+        
+        listener = kb.Listener(on_press=on_key_press, on_release=on_key_release)
+        listener.start()
+        
+        # Add periodic check to keep UI responsive
+        def check_running():
+            if self.running:
+                self.popup.root.after(100, check_running)
+            else:
+                listener.stop()
+                self.popup.root.destroy()
+        
+        self.popup.root.after(100, check_running)
         
         try:
-            listener.start()
-            
-            # Keep running and show statistics
-            while True:
-                time.sleep(10)
-                if self.words_checked > 0:
-                    print(f"📊 Stats: {self.words_checked} words checked, {self.corrections_made} corrections made")
-        
-        except KeyboardInterrupt:
-            print("\n\n" + "="*70)
-            print("STOPPING SERVICE")
-            print("="*70)
-            print(f"\n📊 Final Statistics:")
-            print(f"   Words checked: {self.words_checked}")
-            print(f"   Corrections made: {self.corrections_made}")
-            print(f"   Correction rate: {(self.corrections_made/max(self.words_checked,1)*100):.1f}%")
-            print("\n✅ Service stopped successfully")
-            print("="*70 + "\n")
-            listener.stop()
+            self.popup.root.mainloop()  # keep Tkinter UI active
+        except Exception as e:
+            print(f"\n⚠️ Service stopped: {e}")
+        finally:
+            if listener.running:
+                listener.stop()
+            print("\n✅ Service stopped successfully\n")
 
 
 def main():
     """Main entry point"""
+    service = None
+    
+    def signal_handler(sig, frame):
+        """Handle Ctrl+C from terminal"""
+        print("\n\n🛑 Ctrl+C detected - Stopping service...")
+        if service:
+            service.running = False
+            try:
+                service.popup.root.quit()
+            except:
+                pass
+        sys.exit(0)
+    
+    # Register signal handler for Ctrl+C in terminal
+    signal.signal(signal.SIGINT, signal_handler)
+    
     try:
         print("\n🎯 Starting Kannada Smart Keyboard Service...")
-        print("   This may take a moment while loading NLP models...\n")
-        
+        print("   Loading NLP models...\n")
         service = SmartKeyboardService()
         service.run()
-    
+    except KeyboardInterrupt:
+        print("\n\n🛑 Service interrupted")
+        sys.exit(0)
     except Exception as e:
-        print(f"\n❌ Fatal Error: {e}")
         import traceback
+        print(f"❌ Fatal Error: {e}")
         traceback.print_exc()
         sys.exit(1)
 
