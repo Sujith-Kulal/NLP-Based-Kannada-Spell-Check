@@ -188,6 +188,12 @@ class SmartKeyboardService:
             char = None
             if hasattr(key, 'char'):
                 char = key.char
+            elif key == Key.space:
+                char = ' '
+            elif key == Key.enter:
+                char = '\n'
+            elif key == Key.tab:
+                char = '\t'
             
             # Check if it's a delimiter (space, enter, punctuation)
             if char and self.is_word_delimiter(char):
