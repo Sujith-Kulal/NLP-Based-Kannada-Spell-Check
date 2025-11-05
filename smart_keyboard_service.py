@@ -28,11 +28,13 @@ import os
 import time
 import threading
 import tkinter as tk
-from ctypes import wintypes
+from ctypes import wintypes, windll, byref, Structure, c_long, c_ulong, pointer, POINTER, sizeof
 from win32api import GetCursorPos
 import signal
 import win32clipboard
 import re
+import win32gui
+import win32con
 
 # Add project paths
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -48,6 +50,72 @@ except ImportError:
     print("❌ Error: Required packages not installed")
     print("Install: pip install pywin32 pynput")
     sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# Windows API structures for caret position
+# ---------------------------------------------------------------------------
+class POINT(Structure):
+    _fields_ = [("x", c_long), ("y", c_long)]
+
+class RECT(Structure):
+    _fields_ = [("left", c_long), ("top", c_long), ("right", c_long), ("bottom", c_long)]
+
+class GUITHREADINFO(Structure):
+    _fields_ = [
+        ("cbSize", c_ulong),
+        ("flags", c_ulong),
+        ("hwndActive", wintypes.HWND),
+        ("hwndFocus", wintypes.HWND),
+        ("hwndCapture", wintypes.HWND),
+        ("hwndMenuOwner", wintypes.HWND),
+        ("hwndMoveSize", wintypes.HWND),
+        ("hwndCaret", wintypes.HWND),
+        ("rcCaret", RECT)
+    ]
+
+def get_caret_position():
+    """Get the screen position of the text caret (insertion point)"""
+    try:
+        # Get the foreground window and thread
+        hwnd = windll.user32.GetForegroundWindow()
+        thread_id = windll.user32.GetWindowThreadProcessId(hwnd, 0)
+        
+        # Get GUI thread info for the foreground window's thread
+        gui_info = GUITHREADINFO(cbSize=sizeof(GUITHREADINFO))
+        result = windll.user32.GetGUIThreadInfo(thread_id, byref(gui_info))
+        
+        if not result:
+            print("⚠️ GetGUIThreadInfo failed, using cursor position")
+            return GetCursorPos()
+        
+        # Get caret window and rectangle
+        caret_hwnd = gui_info.hwndCaret
+        if not caret_hwnd:
+            print("⚠️ No caret window found, using cursor position")
+            return GetCursorPos()
+        
+        # Get focused window if caret window is 0
+        if not caret_hwnd:
+            caret_hwnd = gui_info.hwndFocus
+            
+        if not caret_hwnd:
+            print("⚠️ No focus window found, using cursor position")
+            return GetCursorPos()
+        
+        # Convert caret rect to screen coordinates
+        caret_rect = gui_info.rcCaret
+        point = POINT(caret_rect.left, caret_rect.bottom)
+        windll.user32.ClientToScreen(caret_hwnd, byref(point))
+        
+        print(f"✅ Caret position: ({point.x}, {point.y})")
+        return (point.x, point.y)
+    except Exception as e:
+        print(f"❌ Error getting caret position: {e}")
+        # Fallback to mouse cursor position
+        cursor_pos = GetCursorPos()
+        print(f"⚠️ Using cursor position: {cursor_pos}")
+        return cursor_pos
 
 
 # ---------------------------------------------------------------------------
@@ -86,7 +154,7 @@ class SuggestionPopup:
         self.listbox.bind('<Motion>', self._on_hover)
 
     def show(self, suggestions):
-        """Show popup near cursor"""
+        """Show popup near the text caret (where text is being typed)"""
         if not suggestions:
             return
         self.suggestions = suggestions
@@ -96,8 +164,12 @@ class SuggestionPopup:
             self.listbox.insert(tk.END, s)
         self.listbox.select_set(0)
         self.listbox.activate(0)
-        x, y = GetCursorPos()
-        self.root.geometry(f"+{x+10}+{y+20}")
+        
+        # Get caret position (where text is being typed) instead of mouse cursor
+        x, y = get_caret_position()
+        
+        # Position popup slightly below and to the right of the caret
+        self.root.geometry(f"+{x+10}+{y+5}")
         self.root.deiconify()
         self.visible = True
         self.root.lift()
