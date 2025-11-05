@@ -20,7 +20,7 @@ Usage:
     python smart_keyboard_service.py
 
 Press Ctrl+Shift+K to toggle suggestion feature ON/OFF
-Press Ctrl+C to exit
+Press Esc twice to stop the service
 """
 
 import sys
@@ -416,28 +416,17 @@ def main():
     """Main entry point"""
     service = None
     
-    def signal_handler(sig, frame):
-        """Handle Ctrl+C from terminal (not global hotkey)"""
-        print("\n\n🛑 Terminal Ctrl+C detected - Stopping service...")
-        if service:
-            service.running = False
-            try:
-                service.popup.root.quit()
-            except:
-                pass
-        sys.exit(0)
-    
-    # Register signal handler for Ctrl+C in terminal
-    signal.signal(signal.SIGINT, signal_handler)
+    # Ignore Ctrl+C (SIGINT) so only double Esc can stop the service
+    try:
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+    except Exception:
+        pass
     
     try:
         print("\n🎯 Starting Kannada Smart Keyboard Service...")
         print("   Loading NLP models...\n")
         service = SmartKeyboardService()
         service.run()
-    except KeyboardInterrupt:
-        print("\n\n🛑 Service interrupted")
-        sys.exit(0)
     except Exception as e:
         import traceback
         print(f"❌ Fatal Error: {e}")
