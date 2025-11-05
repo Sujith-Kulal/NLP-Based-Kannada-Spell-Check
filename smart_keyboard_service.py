@@ -174,17 +174,18 @@ class SmartKeyboardService:
         self.last_word = ""  # Store last word for replacement
         self.running = False  # Service running flag
         self.replacing = False  # Flag to prevent re-showing popup during replacement
+        self.last_esc_time = 0  # Track last Esc press for double-tap detection
 
         print("\n✅ Smart Keyboard Service initialized!")
         print("\n📝 Controls:")
         print("   Ctrl+Shift+K : Toggle suggestions ON/OFF")
         print("   ↑ / ↓        : Navigate suggestions")
         print("   Enter / Click: Replace word with selected suggestion")
-        print("   Esc          : Hide suggestions")
-        print("   Ctrl+C       : Exit service (Press in terminal or this window)")
+        print("   Esc (popup)  : Hide suggestions")
+        print("   Esc (twice)  : Stop the service")
         print("\n🚀 Service running... Type Kannada text in any app to see suggestions!")
         print("="*70 + "\n")
-        print("💡 TIP: Press Ctrl+C in the terminal window to exit cleanly")
+        print("💡 TIP: Press Esc twice quickly to stop the service cleanly")
     
     def is_word_delimiter(self, char):
         """Check if character is a word boundary"""
@@ -265,6 +266,34 @@ class SmartKeyboardService:
             if self.replacing:
                 return
             
+            # Handle Esc key - hide popup or exit if pressed twice quickly
+            if key == Key.esc:
+                # record time of this Esc press
+                current_time = time.time()
+                # if second Esc within threshold -> stop service
+                if current_time - self.last_esc_time < 1.0:
+                    print("\n🛑 Esc pressed twice - Stopping service...")
+                    self.running = False
+                    try:
+                        self.popup.hide()
+                    except Exception:
+                        pass
+                    try:
+                        self.popup.root.quit()
+                    except Exception:
+                        pass
+                    self.last_esc_time = 0
+                    return
+
+                # otherwise, set last_esc_time and hide popup if visible
+                self.last_esc_time = current_time
+                if self.popup.visible:
+                    try:
+                        self.popup.hide()
+                    except Exception:
+                        pass
+                return
+            
             # Navigation controls for popup
             if self.popup.visible:
                 if key == Key.down:
@@ -278,9 +307,6 @@ class SmartKeyboardService:
                     if chosen:
                         self.popup.hide()
                         self.replace_word(chosen)
-                    return
-                elif key == Key.esc:
-                    self.popup.hide()
                     return
 
             # Handle normal characters
@@ -342,13 +368,6 @@ class SmartKeyboardService:
         def on_activate_toggle():
             self.toggle_enabled()
         
-        def on_exit():
-            """Handle Ctrl+C to exit"""
-            print("\n🛑 Stopping service...")
-            self.running = False
-            self.popup.hide()
-            self.popup.root.quit()
-        
         from pynput import keyboard as kb
         
         # Setup hotkeys
@@ -357,23 +376,16 @@ class SmartKeyboardService:
             on_activate_toggle
         )
         
-        exit_hotkey = kb.HotKey(
-            kb.HotKey.parse('<ctrl>+c'),
-            on_exit
-        )
-        
         def for_canonical(f):
             return lambda k: f(listener.canonical(k))
         
         def on_key_press(key):
             for_canonical(toggle_hotkey.press)(key)
-            for_canonical(exit_hotkey.press)(key)
             if self.running:
                 self.on_press(key)
         
         def on_key_release(key):
             for_canonical(toggle_hotkey.release)(key)
-            for_canonical(exit_hotkey.release)(key)
             if self.running:
                 self.on_release(key)
         
@@ -405,8 +417,8 @@ def main():
     service = None
     
     def signal_handler(sig, frame):
-        """Handle Ctrl+C from terminal"""
-        print("\n\n🛑 Ctrl+C detected - Stopping service...")
+        """Handle Ctrl+C from terminal (not global hotkey)"""
+        print("\n\n🛑 Terminal Ctrl+C detected - Stopping service...")
         if service:
             service.running = False
             try:
