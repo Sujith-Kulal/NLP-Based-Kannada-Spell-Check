@@ -463,6 +463,22 @@ class SmartKeyboardService:
                         self.replace_word(chosen)
                     return
 
+            # Handle backspace - remove last character from buffer
+            if key == Key.backspace:
+                if self.current_word:
+                    self.current_word.pop()
+                    # Hide popup when backspacing
+                    if self.popup.visible:
+                        self.popup.hide()
+                return
+            
+            # Handle delete key - clear the current word buffer
+            if key == Key.delete:
+                self.current_word = []
+                if self.popup.visible:
+                    self.popup.hide()
+                return
+
             # Handle normal characters
             char = None
             if hasattr(key, 'char'):
