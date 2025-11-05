@@ -466,14 +466,28 @@ class SmartKeyboardService:
             # Handle backspace - remove last character from buffer
             if key == Key.backspace:
                 if self.current_word:
+                    # Remove last character
                     self.current_word.pop()
+                    # If buffer becomes empty after backspace, ensure it's cleared
+                    if not self.current_word:
+                        self.current_word = []
                     # Hide popup when backspacing
                     if self.popup.visible:
                         self.popup.hide()
+                else:
+                    # If backspace pressed with empty buffer, ensure it stays empty
+                    self.current_word = []
                 return
             
             # Handle delete key - clear the current word buffer
             if key == Key.delete:
+                self.current_word = []
+                if self.popup.visible:
+                    self.popup.hide()
+                return
+            
+            # Handle arrow keys - clear buffer as cursor likely moved
+            if key in [Key.left, Key.right, Key.up, Key.down, Key.home, Key.end, Key.page_up, Key.page_down]:
                 self.current_word = []
                 if self.popup.visible:
                     self.popup.hide()
@@ -494,6 +508,7 @@ class SmartKeyboardService:
                 # ✅ ALWAYS check and hide popup, even if word is empty
                 if self.current_word and self.enabled and not self.replacing:
                     word = ''.join(self.current_word)
+                    print(f"🔍 Buffer at delimiter: {repr(self.current_word)} → Word: '{word}'")
                     self.last_word = word  # Store the word for replacement
                     self.words_checked += 1
                     suggestions = self.get_suggestions(word)
@@ -504,6 +519,7 @@ class SmartKeyboardService:
                 else:
                     # ✅ Hide popup if no word was typed (multiple spaces, etc.)
                     self.popup.hide()
+                # Always clear buffer after delimiter
                 self.current_word = []
             elif char:
                 # ✅ Hide popup while actively typing a new word
