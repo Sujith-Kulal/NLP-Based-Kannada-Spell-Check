@@ -196,8 +196,16 @@ class SuggestionPopup:
         self.listbox.activate(self.selected)
 
     def get_selected(self):
-        if not self.visible or not self.suggestions:
+        if not self.suggestions:
+            print(f"⚠️ get_selected: No suggestions available")
             return None
+        if not self.visible:
+            print(f"⚠️ get_selected: Popup not visible")
+            return None
+        if self.selected < 0 or self.selected >= len(self.suggestions):
+            print(f"⚠️ get_selected: Invalid selection index {self.selected}")
+            return None
+        print(f"✅ get_selected: Returning '{self.suggestions[self.selected]}'")
         return self.suggestions[self.selected]
     
     def _on_click(self, event):
@@ -242,7 +250,8 @@ class SmartKeyboardService:
             on_close_callback=self.on_popup_close
         )
         
-        self.current_word = []
+        self.current_word_chars = []  # Characters in the current word being typed/edited
+        self.cursor_index = 0  # Position within the current word buffer
         self.enabled = True
         self.words_checked = 0
         self.last_word = ""  # Store last word for replacement
@@ -251,6 +260,16 @@ class SmartKeyboardService:
         self.last_esc_time = 0  # Track last Esc press for double-tap detection
         self.last_clipboard_content = ""  # Track clipboard for paste detection
         self.clipboard_check_active = False  # Flag to enable clipboard monitoring
+        self.last_replacement_time = 0  # Track when last replacement happened
+        self.last_replaced_word = ""  # Track what word was just replaced
+        self.shift_pressed = False  # Track if shift key is held (for selections)
+        self.selection_anchor = None  # Anchor position when starting a selection
+        self.selection_range = None  # Tuple[int, int] for current selection within the word
+        self.last_committed_word_chars = []  # Snapshot of last word confirmed with delimiter
+        self.pending_restore = False  # Indicates buffer was just restored after delimiter
+        self.trailing_delimiter_count = 0  # Number of consecutive delimiters after last word
+        self.last_delimiter_char = ' '  # Track the delimiter that triggered suggestion
+        self.restore_allowed = False  # Allow one restore after trailing delimiters
 
         print("\n✅ Smart Keyboard Service initialized!")
         print("\n📝 Controls:")
@@ -263,6 +282,23 @@ class SmartKeyboardService:
         print("="*70 + "\n")
         print("💡 TIP: Press Esc twice quickly to stop the service cleanly")
     
+    def reset_current_word(self, preserve_delimiter=False):
+        """Clear the tracked word buffer and reset caret index"""
+        self.current_word_chars = []
+        self.cursor_index = 0
+        self.selection_anchor = None
+        self.selection_range = None
+        self.pending_restore = False
+        self.restore_allowed = preserve_delimiter
+        if not preserve_delimiter:
+            self.trailing_delimiter_count = 0
+            self.last_committed_word_chars = []
+            self.last_delimiter_char = ' '
+
+    def sync_committed_buffer(self):
+        """Keep committed snapshot aligned with current buffer"""
+        self.last_committed_word_chars = self.current_word_chars.copy()
+
     def is_word_delimiter(self, char):
         """Check if character is a word boundary"""
         if not char:
@@ -272,6 +308,22 @@ class SmartKeyboardService:
     def is_kannada_char(self, char):
         """Check if character is Kannada"""
         return char and '\u0C80' <= char <= '\u0CFF'
+
+    def type_delimiter_key(self, delimiter):
+        """Re-type the delimiter that triggered the suggestion"""
+        if not delimiter:
+            return
+        if delimiter == ' ':
+            self.keyboard_controller.press(Key.space)
+            self.keyboard_controller.release(Key.space)
+        elif delimiter in ('\n', '\r'):
+            self.keyboard_controller.press(Key.enter)
+            self.keyboard_controller.release(Key.enter)
+        elif delimiter == '\t':
+            self.keyboard_controller.press(Key.tab)
+            self.keyboard_controller.release(Key.tab)
+        else:
+            self.keyboard_controller.type(delimiter)
     
     def get_clipboard_text(self):
         """Get text from clipboard safely"""
@@ -358,8 +410,12 @@ class SmartKeyboardService:
         try:
             print(f"✅ Replacing with: '{chosen_word}'")
             self.replacing = True  # Set flag to prevent re-triggering
+            self.last_replaced_word = chosen_word  # Remember what we just replaced
+            self.last_replacement_time = time.time()  # Remember when
             self.popup.hide()  # Ensure popup is hidden
             time.sleep(0.05)
+
+            delimiter = self.last_delimiter_char or ' '
             
             # Remove the delimiter (space) that triggered the suggestion
             self.keyboard_controller.press(Key.backspace)
@@ -383,13 +439,19 @@ class SmartKeyboardService:
             # Type the chosen word
             self.keyboard_controller.type(chosen_word)
             time.sleep(0.01)
+            self.last_committed_word_chars = list(chosen_word)
             
-            # Add space after the word
-            self.keyboard_controller.press(Key.space)
-            self.keyboard_controller.release(Key.space)
-            time.sleep(0.05)
+            # Re-type the original delimiter so spacing stays consistent
+            self.type_delimiter_key(delimiter)
+            self.last_delimiter_char = delimiter
+            self.trailing_delimiter_count = 1
+            
+            # Wait longer before resetting flag to ensure space is fully processed
+            time.sleep(0.15)
             
             self.replacing = False  # Reset flag after replacement complete
+            print("✅ Replacement complete")
+            self.reset_current_word(preserve_delimiter=True)
             
         except Exception as e:
             print(f"⚠️ Replacement failed: {e}")
@@ -400,6 +462,13 @@ class SmartKeyboardService:
         try:
             # Skip processing if we're in the middle of replacing
             if self.replacing:
+                return
+
+            # Track Shift key for selection handling
+            if key in (Key.shift, Key.shift_r):
+                self.shift_pressed = True
+                if self.selection_anchor is None:
+                    self.selection_anchor = self.cursor_index
                 return
             
             # Detect Ctrl+V paste operation
@@ -448,7 +517,7 @@ class SmartKeyboardService:
                         pass
                 return
             
-            # Navigation controls for popup
+            # Navigation controls for popup (only handles list navigation/selection)
             if self.popup.visible:
                 if key == Key.down:
                     self.popup.select_next()
@@ -457,38 +526,143 @@ class SmartKeyboardService:
                     self.popup.select_prev()
                     return
                 elif key == Key.enter:
+                    print("🔍 Enter pressed - popup visible")
                     chosen = self.popup.get_selected()
+                    print(f"🔍 Selected suggestion: {chosen}")
                     if chosen:
                         self.popup.hide()
                         self.replace_word(chosen)
+                    else:
+                        print("⚠️ No suggestion selected")
                     return
 
-            # Handle backspace - remove last character from buffer
+            # Buffer-aware editing controls (apply whether popup is visible or not)
             if key == Key.backspace:
-                if self.current_word:
-                    # Remove last character
-                    self.current_word.pop()
-                    # If buffer becomes empty after backspace, ensure it's cleared
-                    if not self.current_word:
-                        self.current_word = []
-                    # Hide popup when backspacing
-                    if self.popup.visible:
-                        self.popup.hide()
+                if self.trailing_delimiter_count > 0:
+                    self.trailing_delimiter_count = max(0, self.trailing_delimiter_count - 1)
+                    self.pending_restore = False
+                    print(f"⬅️ Removed trailing delimiter (remaining: {self.trailing_delimiter_count})")
+                    if (self.trailing_delimiter_count == 0 and not self.current_word_chars
+                            and self.last_committed_word_chars and self.restore_allowed):
+                        self.current_word_chars = self.last_committed_word_chars.copy()
+                        self.cursor_index = len(self.current_word_chars)
+                        self.pending_restore = True
+                        self.restore_allowed = False
+                        print(f"🔄 Restored last word buffer '{''.join(self.current_word_chars)}' before backspace")
+                    return
+                if self.pending_restore:
+                    # We restored the buffer on previous event; now perform actual deletion
+                    self.pending_restore = False
+                    self.restore_allowed = False
+                    if self.selection_range:
+                        start, end = self.selection_range
+                        removed = ''.join(self.current_word_chars[start:end])
+                        del self.current_word_chars[start:end]
+                        self.cursor_index = start
+                        print(f"⌫ Backspace cleared selection '{removed}' → Buffer: {''.join(self.current_word_chars)} (cursor @ {self.cursor_index})")
+                        self.selection_range = None
+                        self.selection_anchor = None
+                        self.sync_committed_buffer()
+                    elif self.cursor_index > 0:
+                        removed_char = self.current_word_chars.pop(self.cursor_index - 1)
+                        self.cursor_index -= 1
+                        print(f"⌫ Backspace removed '{removed_char}' → Buffer: {''.join(self.current_word_chars)} (cursor @ {self.cursor_index})")
+                        self.sync_committed_buffer()
+                    else:
+                        self.reset_current_word()
+                elif self.selection_range:
+                    self.restore_allowed = False
+                    start, end = self.selection_range
+                    removed = ''.join(self.current_word_chars[start:end])
+                    del self.current_word_chars[start:end]
+                    self.cursor_index = start
+                    print(f"⌫ Backspace cleared selection '{removed}' → Buffer: {''.join(self.current_word_chars)} (cursor @ {self.cursor_index})")
+                    self.selection_range = None
+                    self.selection_anchor = None
+                    self.sync_committed_buffer()
+                elif self.cursor_index > 0:
+                    self.restore_allowed = False
+                    removed_char = self.current_word_chars.pop(self.cursor_index - 1)
+                    self.cursor_index -= 1
+                    print(f"⌫ Backspace removed '{removed_char}' → Buffer: {''.join(self.current_word_chars)} (cursor @ {self.cursor_index})")
+                    self.sync_committed_buffer()
+                elif not self.current_word_chars and self.last_committed_word_chars and self.restore_allowed:
+                    # Restore the last committed word so edits after clicking still have context
+                    self.current_word_chars = self.last_committed_word_chars.copy()
+                    self.cursor_index = len(self.current_word_chars)
+                    self.pending_restore = True
+                    self.restore_allowed = False
+                    print(f"🔄 Restored last word buffer '{''.join(self.current_word_chars)}' before backspace")
+                    return
                 else:
-                    # If backspace pressed with empty buffer, ensure it stays empty
-                    self.current_word = []
-                return
-            
-            # Handle delete key - clear the current word buffer
-            if key == Key.delete:
-                self.current_word = []
+                    self.reset_current_word()
                 if self.popup.visible:
                     self.popup.hide()
                 return
-            
-            # Handle arrow keys - clear buffer as cursor likely moved
-            if key in [Key.left, Key.right, Key.up, Key.down, Key.home, Key.end, Key.page_up, Key.page_down]:
-                self.current_word = []
+
+            if key == Key.delete:
+                self.pending_restore = False
+                if self.selection_range:
+                    self.restore_allowed = False
+                    start, end = self.selection_range
+                    removed = ''.join(self.current_word_chars[start:end])
+                    del self.current_word_chars[start:end]
+                    self.cursor_index = start
+                    print(f"⌦ Delete cleared selection '{removed}' → Buffer: {''.join(self.current_word_chars)} (cursor @ {self.cursor_index})")
+                    self.selection_range = None
+                    self.selection_anchor = None
+                elif self.cursor_index < len(self.current_word_chars):
+                    self.restore_allowed = False
+                    removed_char = self.current_word_chars.pop(self.cursor_index)
+                    print(f"⌦ Delete removed '{removed_char}' → Buffer: {''.join(self.current_word_chars)} (cursor @ {self.cursor_index})")
+                elif self.trailing_delimiter_count > 0:
+                    self.trailing_delimiter_count = max(0, self.trailing_delimiter_count - 1)
+                    print(f"⌦ Consumed trailing delimiter with Delete (remaining: {self.trailing_delimiter_count})")
+                if self.popup.visible:
+                    self.popup.hide()
+                return
+
+            if key == Key.left:
+                self.pending_restore = False
+                self.restore_allowed = False
+                prev_index = self.cursor_index
+                if self.cursor_index > 0:
+                    self.cursor_index -= 1
+                if self.shift_pressed:
+                    if self.selection_anchor is None:
+                        self.selection_anchor = prev_index
+                    start = min(self.cursor_index, self.selection_anchor)
+                    end = max(self.cursor_index, self.selection_anchor)
+                    self.selection_range = (start, end)
+                    print(f"◀️ Selection range {self.selection_range}")
+                else:
+                    self.selection_anchor = None
+                    self.selection_range = None
+                    print(f"◀️ Cursor moved left → index {self.cursor_index}")
+                return
+
+            if key == Key.right:
+                self.pending_restore = False
+                self.restore_allowed = False
+                prev_index = self.cursor_index
+                if self.cursor_index < len(self.current_word_chars):
+                    self.cursor_index += 1
+                if self.shift_pressed:
+                    if self.selection_anchor is None:
+                        self.selection_anchor = prev_index
+                    start = min(self.cursor_index, self.selection_anchor)
+                    end = max(self.cursor_index, self.selection_anchor)
+                    self.selection_range = (start, end)
+                    print(f"▶️ Selection range {self.selection_range}")
+                else:
+                    self.selection_anchor = None
+                    self.selection_range = None
+                    print(f"▶️ Cursor moved right → index {self.cursor_index}")
+                return
+
+            if key in [Key.up, Key.down, Key.home, Key.end, Key.page_up, Key.page_down]:
+                self.pending_restore = False
+                self.reset_current_word()
                 if self.popup.visible:
                     self.popup.hide()
                 return
@@ -500,34 +674,69 @@ class SmartKeyboardService:
             elif key == Key.space:
                 char = ' '
             elif key == Key.enter:
-                char = '\n'
+                # Don't treat Enter as delimiter if popup is visible (it's for selection)
+                if not self.popup.visible:
+                    char = '\n'
             elif key == Key.tab:
                 char = '\t'
 
             if char and self.is_word_delimiter(char):
+                self.pending_restore = False
+                self.last_delimiter_char = char
+                self.trailing_delimiter_count += 1
                 # ✅ ALWAYS check and hide popup, even if word is empty
-                if self.current_word and self.enabled and not self.replacing:
-                    word = ''.join(self.current_word)
-                    print(f"🔍 Buffer at delimiter: {repr(self.current_word)} → Word: '{word}'")
-                    self.last_word = word  # Store the word for replacement
-                    self.words_checked += 1
-                    suggestions = self.get_suggestions(word)
-                    if suggestions:
-                        self.popup.show(suggestions)
-                    else:
+                if self.current_word_chars and self.enabled and not self.replacing:
+                    word = ''.join(self.current_word_chars)
+                    self.last_committed_word_chars = self.current_word_chars.copy()
+                    print(f"🔍 Buffer at delimiter: {self.current_word_chars} (cursor @ {self.cursor_index}) → Word: '{word}'")
+                    
+                    # Check if this is the word we just replaced (within 0.5 seconds)
+                    time_since_replacement = time.time() - self.last_replacement_time
+                    if word == self.last_replaced_word and time_since_replacement < 0.5:
+                        print(f"⏭️ Skipping check - just replaced this word")
                         self.popup.hide()
+                        self.last_replaced_word = ""  # Clear it
+                    else:
+                        self.last_word = word  # Store the word for replacement
+                        self.words_checked += 1
+                        suggestions = self.get_suggestions(word)
+                        if suggestions:
+                            self.popup.show(suggestions)
+                        else:
+                            self.popup.hide()
                 else:
                     # ✅ Hide popup if no word was typed (multiple spaces, etc.)
                     self.popup.hide()
                 # Always clear buffer after delimiter
-                self.current_word = []
+                self.reset_current_word(preserve_delimiter=True)
             elif char:
+                self.pending_restore = False
+                self.restore_allowed = False
                 # ✅ Hide popup while actively typing a new word
                 if self.popup.visible:
                     self.popup.hide()
-                self.current_word.append(char)
-                if len(self.current_word) > 50:
-                    self.current_word = self.current_word[-50:]
+                if self.selection_range:
+                    start, end = self.selection_range
+                    removed = ''.join(self.current_word_chars[start:end])
+                    del self.current_word_chars[start:end]
+                    self.cursor_index = start
+                    print(f"✏️ Replacing selection '{removed}' before inserting '{char}'")
+                    self.selection_range = None
+                    self.selection_anchor = None
+                self.current_word_chars.insert(self.cursor_index, char)
+                self.cursor_index += 1
+                self.trailing_delimiter_count = 0
+                if len(self.current_word_chars) > 50:
+                    # Keep last 50 chars and adjust cursor index accordingly
+                    overflow = len(self.current_word_chars) - 50
+                    if overflow > 0:
+                        self.current_word_chars = self.current_word_chars[overflow:]
+                        self.cursor_index = max(0, self.cursor_index - overflow)
+                else:
+                    # Clear selection state after normal typing
+                    self.selection_anchor = None
+                    self.selection_range = None
+                print(f"⌨️ Typed '{char}' → Buffer: {''.join(self.current_word_chars)} (cursor @ {self.cursor_index})")
         except Exception:
             pass
     
@@ -536,6 +745,10 @@ class SmartKeyboardService:
         # Reset clipboard check flag when Ctrl is released
         if key == Key.ctrl_l or key == Key.ctrl_r:
             self.clipboard_check_active = False
+        if key in (Key.shift, Key.shift_r):
+            self.shift_pressed = False
+            # Keep selection range (text remains highlighted) but clear anchor
+            self.selection_anchor = None
     
     def toggle_enabled(self):
         """Toggle suggestion mode"""
