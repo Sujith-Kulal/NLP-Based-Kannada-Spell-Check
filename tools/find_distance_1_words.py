@@ -2,6 +2,7 @@
 """
 Find words with edit distance = 1 for testing
 Based on actual paradigm file contents
+Now with PARADIGM GENERATOR support!
 """
 import sys
 import os
@@ -29,8 +30,19 @@ def levenshtein(s1, s2):
     
     return previous_row[-1]
 
-print("Loading spell checker...")
+print("Loading spell checker (with Paradigm Generator if available)...")
 checker = EnhancedSpellChecker()
+
+# Show if paradigm generator is active
+if hasattr(checker, 'paradigm_generator') and checker.paradigm_generator:
+    print("\n✨ PARADIGM GENERATOR ACTIVE!")
+    stats = checker.paradigm_generator.get_stats()
+    print(f"   Base paradigms: {stats['base_count']:,}")
+    print(f"   Derived paradigms: {stats['derived_count']:,}")
+    print(f"   Total paradigms: {stats['total_count']:,}")
+    print(f"   Dictionary expanded by paradigm forms!")
+else:
+    print("\n📖 Using standard dictionary loading")
 
 print("\n" + "="*70)
 print("WORDS WITH EDIT DISTANCE = 1 (Perfect for Testing)")

@@ -15,6 +15,23 @@ from typing import Any, Dict, List, Optional
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from kannada_wx_converter import kannada_to_wx, is_kannada_text, wx_to_kannada
 
+# Try to import paradigm generator (optional enhancement)
+try:
+    from paradigm_generator import ParadigmGenerator
+    PARADIGM_GENERATOR_AVAILABLE = True
+except ImportError:
+    PARADIGM_GENERATOR_AVAILABLE = False
+    ParadigmGenerator = None
+
+# Try to import morphological paradigm logic (optional enhancement)
+try:
+    from paradigm_logic import initialize_paradigm_system, get_all_surface_forms
+    MORPHOLOGICAL_PARADIGM_AVAILABLE = True
+except ImportError:
+    MORPHOLOGICAL_PARADIGM_AVAILABLE = False
+    initialize_paradigm_system = None
+    get_all_surface_forms = None
+
 
 PRONOUN_VARIANT_GROUPS = [
     {
@@ -93,7 +110,7 @@ PARADIGM_FILENAME_PATTERN = re.compile(r"^(?P<root>.*?)(?P<tag>[A-Z]+\d*)$")
 class SimplifiedSpellChecker:
     """Simplified spell checker - dictionary lookup only"""
 
-    def __init__(self) -> None:
+    def __init__(self, use_paradigm_generator: bool = True) -> None:
         print("\n" + "=" * 70)
         print("Simplified Kannada Spell Checker")
         print("Dictionary Lookup Only (No POS/Chunking)")
@@ -101,9 +118,25 @@ class SimplifiedSpellChecker:
 
         self.tokenize_func = None
         self._reset_paradigm_structures()
+        
+        # Paradigm generator (optional enhancement)
+        self.paradigm_generator = None
+        self.use_paradigm_generator = use_paradigm_generator and PARADIGM_GENERATOR_AVAILABLE
+        
+        # Morphological paradigm system (optional enhancement)
+        self.morphological_paradigms = None
+        self.use_morphological_paradigms = MORPHOLOGICAL_PARADIGM_AVAILABLE
 
         self.load_tokenizer()
         self.load_dictionary()
+        
+        # Initialize paradigm generator if available and enabled
+        if self.use_paradigm_generator:
+            self._initialize_paradigm_generator()
+        
+        # Initialize morphological paradigm system if available
+        if self.use_morphological_paradigms:
+            self._initialize_morphological_paradigms()
 
         print("\n[ready] Ready!")
 
@@ -140,7 +173,7 @@ class SimplifiedSpellChecker:
 
     def load_tokenizer(self) -> None:
         """Load tokenizer if available"""
-        print("\n[1/3] Loading tokenizer ...")
+        print("\n[1/4] Loading tokenizer ...")
         try:
             sys.path.append(os.path.join(os.path.dirname(__file__), "Token"))
             from tokenizer_for_indian_languages_on_files import tokenize_sentence
@@ -150,10 +183,81 @@ class SimplifiedSpellChecker:
         except Exception:
             print("  [warn] Falling back to regex tokenizer")
             self.tokenize_func = None
+    
+    def _initialize_paradigm_generator(self) -> None:
+        """Initialize paradigm generator for dynamic paradigm expansion"""
+        print("\n[2/4] Initializing Paradigm Generator ...")
+        try:
+            self.paradigm_generator = ParadigmGenerator()
+            all_paradigms = self.paradigm_generator.initialize_paradigms()
+            
+            # Add ALL inflected forms to dictionary (not just base words!)
+            added_count = 0
+            
+            # Method 1: Add all inflected forms directly
+            if hasattr(self.paradigm_generator, 'all_inflected_forms'):
+                for form in self.paradigm_generator.all_inflected_forms:
+                    if form and form not in self.all_words:
+                        self.all_words.add(form)
+                        added_count += 1
+            else:
+                # Fallback: Extract from paradigms
+                for word, forms in all_paradigms.items():
+                    # Add base word
+                    if word not in self.all_words:
+                        self.all_words.add(word)
+                        added_count += 1
+                    # Add all inflected forms
+                    for form in forms.values():
+                        if form and form not in self.all_words:
+                            self.all_words.add(form)
+                            added_count += 1
+            
+            print(f"  [paradigm-gen] Added {added_count:,} paradigm forms to dictionary")
+            if hasattr(self.paradigm_generator, 'stats'):
+                stats = self.paradigm_generator.stats
+                if 'total_inflected_forms' in stats:
+                    print(f"  [paradigm-gen] Total unique forms: {stats['total_inflected_forms']:,}")
+            print("  [ok] Paradigm generator ready")
+        except Exception as e:
+            print(f"  [warn] Paradigm generator failed: {e}")
+            print("  [info] Continuing with standard paradigm loading")
+            import traceback
+            traceback.print_exc()
+            self.paradigm_generator = None
+            self.use_paradigm_generator = False
+    
+    def _initialize_morphological_paradigms(self) -> None:
+        """Initialize morphological paradigm system for dynamic word form generation"""
+        print("\n[3/4] Initializing Morphological Paradigm System ...")
+        try:
+            # Initialize the paradigm system with default configuration
+            self.morphological_paradigms = initialize_paradigm_system()
+            
+            # Extract all surface forms and add to dictionary
+            if self.morphological_paradigms:
+                surface_forms = get_all_surface_forms(self.morphological_paradigms)
+                added_count = 0
+                for form in surface_forms:
+                    if form and form not in self.all_words:
+                        self.all_words.add(form)
+                        added_count += 1
+                
+                print(f"  [morpho-paradigm] Added {added_count:,} morphological forms to dictionary")
+                print(f"  [morpho-paradigm] Total variant paradigms: {len(self.morphological_paradigms):,}")
+            print("  [ok] Morphological paradigm system ready")
+        except Exception as e:
+            print(f"  [warn] Morphological paradigm system failed: {e}")
+            print("  [info] Continuing without morphological paradigm expansion")
+            import traceback
+            traceback.print_exc()
+            self.morphological_paradigms = None
+            self.use_morphological_paradigms = False
 
     def load_dictionary(self) -> None:
         """Load base dictionary and build temporary pronoun variants"""
-        print("\n[2/3] Loading dictionary ...")
+        step_num = "3/4" if self.use_paradigm_generator else "2/3"
+        print(f"\n[{step_num}] Loading dictionary ...")
 
         self._reset_paradigm_structures()
 
@@ -570,7 +674,9 @@ EnhancedSpellChecker = SimplifiedSpellChecker
 if __name__ == "__main__":
     checker = SimplifiedSpellChecker()
 
-    print("\n[3/3] Sample checks ...")
+    # Determine step number based on whether paradigm generator was used
+    step_num = "4/4" if checker.use_paradigm_generator else "3/3"
+    print(f"\n[{step_num}] Sample checks ...")
     tests = [
         "nAnu bengalUralli iruwweVneV",
         "ನಾನು ಬೆಂಗಳೂರಲ್ಲಿ ಇರುತ್ತೇನೆ",

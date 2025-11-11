@@ -1,5 +1,6 @@
 transformers
 pandas
+openpyxl
 wxconv
 gdown
 torch
