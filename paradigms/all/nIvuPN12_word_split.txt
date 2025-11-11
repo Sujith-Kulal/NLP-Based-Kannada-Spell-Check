@@ -1,0 +1,280 @@
+nimmannu nIvu(PN12)+nimmannu_nIvu_ACC 
+
+nimmiMxa nIvu(PN12)+nimmiMxa_nIvu_INS
+
+nimageV nIvu(PN12)+nimageV_nIvu_DAT
+
+nimmiMxa nIvu(PN12)+nimmiMxa_nIvu_ABL
+
+nimma nIvu(PN12)+nimma_nIvu_GEN
+
+nimmalli nIvu(PN12)+nimmalli_nIvu_LOC
+
+nimagoskara nIvu(PN12)+nimagoskara_nIvu_BEN
+
+nimagoskara nIvu(PN12)+nimagoskara_nIvu_PUR
+
+nimagAgi nIvu(PN12)+nimagAgi_nIvu_BEN
+
+nimagAgi nIvu(PN12)+nimagAgi_nIvu_PUR
+
+nimagosuga nIvu(PN12)+nimagosuga_nIvu_BEN
+
+nimagosuga nIvu(PN12)+nimagosuga_nIvu_PUR
+
+nimagiMwa nIvu(PN12)+nimagiMwa_nIvu_COMP
+
+nimmaMweV nIvu(PN12)+nimmaMweV_nIvu_SIM
+
+nimmaMwa nIvu(PN12)+nimmaMwa_nIvu_SIM
+
+nimmaMwaha nIvu(PN12)+nimmaMwaha_nIvu_SIM
+
+nimmoVdaneV nIvu(PN12)+nimmoVdaneV_nIvu_SOC
+
+nimmoVMxigeV nIvu(PN12)+nimmoVMxigeV_nIvu_SOC
+nIvA nIvu(PN12)+vu_vu_NOM+vA_vu_INTR
+
+nIvU nIvu(PN12)+vu_vu_NOM+vU_vu_INC
+
+nIvo nIvu(PN12)+vu_vu_NOM+vo_vu_DUB
+
+nIvo nIvu(PN12)+vu_vu_NOM+vo_vu_INDF
+
+nIvo nIvu(PN12)+vu_vu_NOM+vo_vu_PRES
+
+nIve nIvu(PN12)+vu_vu_NOM+ve_vu_IMPH
+
+nIve nIvu(PN12)+vu_vu_NOM+ve_vu_DEC
+
+nIve nIvu(PN12)+vu_vu_NOM+ve_vu_RIS
+
+nimmannA nIvu(PN12)+nimma_nIvu_ACC+nnA_#_INTR
+
+nimmannU nIvu(PN12)+nimma_nIvu_ACC+nnU_#_INC
+
+nimmanno nIvu(PN12)+nimma_nIvu_ACC+nno_#_DUB
+
+nimmanno nIvu(PN12)+nimma_nIvu_ACC+nno_#_INDF
+
+nimmanno nIvu(PN12)+nimma_nIvu_ACC+nno_#_PRES
+
+nimmanne nIvu(PN12)+nimma_nIvu_ACC+nne_#_IMPH
+
+nimmanne nIvu(PN12)+nimma_nIvu_ACC+nne_#_DEC
+
+nimmanne nIvu(PN12)+nimma_nIvu_ACC+nne_#_RIS
+
+nimmiMxalA nIvu(PN12)+nimmiMxa_nIvu_INS+lA_#_INTR
+
+nimmiMxalU nIvu(PN12)+nimmiMxa_nIvu_INS+lU_#_INC
+
+nimmiMxalo nIvu(PN12)+nimmiMxa_nIvu_INS+lo_#_DUB
+
+nimmiMxalo nIvu(PN12)+nimmiMxa_nIvu_INS+lo_#_INDF
+
+nimmiMxalo nIvu(PN12)+nimmiMxa_nIvu_INS+lo_#_PRES
+
+nimmiMxale nIvu(PN12)+nimmiMxa_nIvu_INS+le_#_IMP
+
+nimmiMxale nIvu(PN12)+nimmiMxa_nIvu_INS+le_#_DEC
+
+nimmiMxale nIvu(PN12)+nimmiMxa_nIvu_INS+le_#_RIS
+
+nimagA nIvu(PN12)+nima_nIvu_DAT+gA_#_INTR
+
+nimagU nIvu(PN12)+nima_nIvu_DAT+gU_#_INC
+
+nimago nIvu(PN12)+nima_nIvu_DAT+go_#_DUB
+
+nimago nIvu(PN12)+nima_nIvu_DAT+go_#_INDF
+
+nimago nIvu(PN12)+nima_nIvu_DAT+go_#_PRES
+
+nimage nIvu(PN12)+nima_nIvu_DAT+ge_#_IMPH
+
+nimage nIvu(PN12)+nima_nIvu_DAT+ge_#_DEC
+
+nimage nIvu(PN12)+nima_nIvu_DAT+ge_#_RIS
+
+nimmiMxalA nIvu(PN12)+nimmiMxa_nIvu_ABL+lA_#_INTR
+
+nimmiMxalU nIvu(PN12)+nimmiMxa_nIvu_ABL+lU_#_INC
+
+nimmiMxalo nIvu(PN12)+nimmiMxa_nIvu_ABL+lo_#_DUB
+
+nimmiMxalo nIvu(PN12)+nimmiMxa_nIvu_ABL+lo_#_INDF
+
+nimmiMxalo nIvu(PN12)+nimmiMxa_nIvu_ABL+lo_#_PRES
+
+nimmiMxale nIvu(PN12)+nimmiMxa_nIvu_ABL+le_#_IMP
+
+nimmiMxale nIvu(PN12)+nimmiMxa_nIvu_ABL+le_#_DEC
+
+nimmiMxale nIvu(PN12)+nimmiMxa_nIvu_ABL+le_#_RIS
+
+nimmalliyA nIvu(PN12)+nimmalli_nIvu_LOC+yA_#_INTR
+
+nimmalliyU nIvu(PN12)+nimmalli_nIvu_LOC+yU_#_INC
+
+nimmalliyo nIvu(PN12)+nimmalli_nIvu_LOC+yo_#_DUB
+
+nimmalliyo nIvu(PN12)+nimmalli_nIvu_LOC+yo_#_INDF
+
+nimmalliyo nIvu(PN12)+nimmalli_nIvu_LOC+yo_#_PRES
+
+nimmalliye nIvu(PN12)+nimmalli_nIvu_LOC+ye_#_IMPH
+
+nimmalliye nIvu(PN12)+nimmalli_nIvu_LOC+ye_#_DEC
+
+nimmalliye nIvu(PN12)+nimmalli_nIvu_LOC+ye_#_RIS
+
+nimagoskaravA nIvu(PN12)+nimagoskara_nIvu_BEN+vA_#_INTR
+
+nimagoskaravU nIvu(PN12)+nimagoskara_nIvu_BEN+vU_#_INC
+
+nimagoskaravo nIvu(PN12)+nimagoskara_nIvu_BEN+vo_#_DUB
+
+nimagoskaravo nIvu(PN12)+nimagoskara_nIvu_BEN+vo_#_PRES
+
+nimagoskarave nIvu(PN12)+nimagoskara_nIvu_BEN+ve_#_IMPH
+
+nimagoskarave nIvu(PN12)+nimagoskara_nIvu_BEN+ve_#_DEC
+
+nimagoskarave nIvu(PN12)+nimagoskara_nIvu_BEN+ve_#_RIS
+
+nimagoskaravA nIvu(PN12)+nimagoskara_nIvu_PUR+vA_#_INTR
+
+nimagoskaravU nIvu(PN12)+nimagoskara_nIvu_PUR+vU_#_INC
+
+nimagoskaravo nIvu(PN12)+nimagoskara_nIvu_PUR+vo_#_DUB
+
+nimagoskaravo nIvu(PN12)+nimagoskara_nIvu_PUR+vo_#_PRES
+
+nimagoskarave nIvu(PN12)+nimagoskara_nIvu_PUR+ve_#_IMPH
+
+nimagoskarave nIvu(PN12)+nimagoskara_nIvu_PUR+ve_#_DEC
+
+nimagoskarave nIvu(PN12)+nimagoskara_nIvu_PUR+ve_#_RIS
+
+nimagAgiyA nIvu(PN12)+nimagAgi_nIvu_BEN+yA_#_INTR
+
+nimagAgiyU nIvu(PN12)+nimagAgi_nIvu_BEN+yU_#_INC
+nimagAgiyo nIvu(PN12)+nimagAgi_nIvu_BEN+yo_#_DUB
+
+nimagAgiyo nIvu(PN12)+nimagAgi_nIvu_BEN+yo_#_PRES
+
+nimagAgiye nIvu(PN12)+nimagAgi_nIvu_BEN+ye_#_IMPH
+
+nimagAgiye nIvu(PN12)+nimagAgi_nIvu_BEN+ye_#_DEC
+
+nimagAgiye nIvu(PN12)+nimagAgi_nIvu_BEN+ye_#_RIS
+
+nimagAgiyA nIvu(PN12)+nimagAgi_nIvu_PUR+yA_#_INTR
+
+nimagAgiyU nIvu(PN12)+nimagAgi_nIvu_PUR+yU_#_INC
+
+nimagAgiyo nIvu(PN12)+nimagAgi_nIvu_PUR+yo_#_DUB
+
+nimagAgiyo nIvu(PN12)+nimagAgi_nIvu_PUR+yo_#_PRES
+
+nimagAgiye nIvu(PN12)+nimagAgi_nIvu_PUR+ye_#_IMPH
+
+nimagAgiye nIvu(PN12)+nimagAgi_nIvu_PUR+ye_#_DEC
+
+nimagAgiye nIvu(PN12)+nimagAgi_nIvu_PUR+ye_#_RIS
+
+nimagosugavA nIvu(PN12)+nimagosuga_nIvu_BEN+vA_#_INTR
+
+nimagosugavU nIvu(PN12)+nimagosuga_nIvu_BEN+vU_#_INC
+
+nimagosugavo nIvu(PN12)+nimagosuga_nIvu_BEN+vo_#_DUB
+
+nimagosugavo nIvu(PN12)+nimagosuga_nIvu_BEN+vo_#_INDF
+
+nimagosugavo nIvu(PN12)+nimagosuga_nIvu_BEN+vo_#_PRES
+
+nimagosugave nIvu(PN12)+nimagosuga_nIvu_BEN+ve_#_IMPH
+
+nimagosugave nIvu(PN12)+nimagosuga_nIvu_BEN+ve_#_DEC
+
+nimagosugave nIvu(PN12)+nimagosuga_nIvu_BEN+ve_#_RIS
+
+nimagosugavA nIvu(PN12)+nimagosuga_nIvu_PUR+vA_#_INTR
+
+nimagosugavU nIvu(PN12)+nimagosuga_nIvu_PUR+vU_#_INC
+
+nimagosugavo nIvu(PN12)+nimagosuga_nIvu_PUR+vo_#_DUB
+
+nimagosugavo nIvu(PN12)+nimagosuga_nIvu_PUR+vo_#_INDF
+
+nimagosugavo nIvu(PN12)+nimagosuga_nIvu_PUR+vo_#_PRES
+
+nimagosugave nIvu(PN12)+nimagosuga_nIvu_PUR+ve_#_IMPH
+
+nimagosugave nIvu(PN12)+nimagosuga_nIvu_PUR+ve_#_DEC
+
+nimagosugave nIvu(PN12)+nimagosuga_nIvu_PUR+ve_#_RIS
+
+nimagiMwalA nIvu(PN12)+nimagiMwa_nIvu_COMP+lA_#_INTR
+
+nimagiMwalU nIvu(PN12)+nimagiMwa_nIvu_COMP+lU_#_INC
+
+nimagiMwalo nIvu(PN12)+nimagiMwa_nIvu_COMP+lo_#_DUB
+
+nimagiMwalo nIvu(PN12)+nimagiMwa_nIvu_COMP+lo_#_INDF
+
+nimagiMwalo nIvu(PN12)+nimagiMwa_nIvu_COMP+lo_#_PRES
+
+nimagiMwale nIvu(PN12)+nimagiMwa_nIvu_COMP+le_#_IMPH
+
+nimagiMwale nIvu(PN12)+nimagiMwa_nIvu_COMP+le_#_DEC
+
+nimagiMwale nIvu(PN12)+nimagiMwa_nIvu_COMP+le_#_RIS
+
+nimmaMweVyA nIvu(PN12)+nimmaMweV_nIvu_SIM+yA_#_INTR
+
+nimmaMweVyU nIvu(PN12)+nimmaMweV_nIvu_SIM+yU_#_INC
+
+nimmaMweVyo nIvu(PN12)+nimmaMweV_nIvu_SIM+yo_#_DUB
+
+nimmaMweVyo nIvu(PN12)+nimmaMweV_nIvu_SIM+yo_#_INDF
+
+nimmaMweVyo nIvu(PN12)+nimmaMweV_nIvu_SIM+yo_#_PRES
+
+nimmaMweVye nIvu(PN12)+nimmaMweV_nIvu_SIM+ye_#_IMPH
+
+nimmaMweVye nIvu(PN12)+nimmaMweV_nIvu_SIM+ye_#_DEC
+nimmaMweVye nIvu(PN12)+nimmaMweV_nIvu_SIM+ye_#_RIS
+
+nimmoVdaneVyA nIvu(PN12)+nimmoVdaneV_nIvu_SOC+yA_#_INTR
+
+nimmoVdaneVyU nIvu(PN12)+nimmoVdaneV_nIvu_SOC+yU_#_INC
+
+nimmoVdaneVyo nIvu(PN12)+nimmoVdaneV_nIvu_SOC+yo_#_DUB
+
+nimmoVdaneVyo nIvu(PN12)+nimmoVdaneV_nIvu_SOC+yo_#_INDF
+
+nimmoVdaneVyo nIvu(PN12)+nimmoVdaneV_nIvu_SOC+yo_#_PRES
+
+nimmoVdaneVye nIvu(PN12)+nimmoVdaneV_nIvu_SOC+ye_#_IMPH
+
+nimmoVdaneVye nIvu(PN12)+nimmoVdaneV_nIvu_SOC+ye_#_DEC
+nimmoVdaneVye nIvu(PN12)+nimmoVdaneV_nIvu_SOC+ye_#_RIS
+
+nimmoVMxigeVyA nIvu(PN12)+nimmoVMxigeV_nIvu_SOC+yA_#_INTR
+
+nimmoVMxigeVyU nIvu(PN12)+nimmoVMxigeV_nIvu_SOC+yU_#_INC
+
+nimmoVMxigeVyo nIvu(PN12)+nimmoVMxigeV_nIvu_SOC+yo_#_DUB
+
+nimmoVMxigeVyo nIvu(PN12)+nimmoVMxigeV_nIvu_SOC+yo_#_INDF
+
+nimmoVMxigeVyo nIvu(PN12)+nimmoVMxigeV_nIvu_SOC+yo_#_PRES
+
+nimmoVMxigeVye nIvu(PN12)+nimmoVMxigeV_nIvu_SOC+ye_#_IMPH
+
+nimmoVMxigeVye nIvu(PN12)+nimmoVMxigeV_nIvu_SOC+ye_#_DEC
+
+nimmoVMxigeVye nIvu(PN12)+nimmoVMxigeV_nIvu_SOC+ye_#_RIS
+

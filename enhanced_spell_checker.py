@@ -1,723 +1,583 @@
 #!/usr/bin/env python3
 """
-Enhanced Kannada Spell Checker with Full NLP Pipeline
-Architecture: Tokenization → POS Tagging → Chunking → Paradigm Checking → Suggestions
-Works with ANY editor via clipboard monitoring
-Supports both Kannada Unicode (ಕನ್ನಡ) and WX transliteration
+SIMPLIFIED Kannada Spell Checker (No POS/Chunking)
+Direct dictionary lookup with temporary pronoun paradigm expansion
+plus noun/verb paradigm caching
 """
 import sys
 import os
-import time
 import re
 import pickle
-from datetime import datetime
+from glob import glob
 from collections import defaultdict
+from typing import Any, Dict, List, Optional
 
-# Add project paths
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
-# Import Kannada-WX converter
-from kannada_wx_converter import kannada_to_wx, is_kannada_text, normalize_text
-
-# Clipboard monitoring
-try:
-    import pyperclip
-except ImportError:
-    print("❌ Error: pyperclip not installed")
-    print("Install: pip install pyperclip")
-    sys.exit(1)
-
-# Notifications
-try:
-    from plyer import notification
-    HAS_NOTIFICATIONS = True
-except ImportError:
-    print("⚠️  Warning: plyer not available (notifications disabled)")
-    HAS_NOTIFICATIONS = False
+from kannada_wx_converter import kannada_to_wx, is_kannada_text, wx_to_kannada
 
 
-class EnhancedSpellChecker:
-    """
-    Enhanced spell checker with full NLP pipeline:
-    1. Tokenization
-    2. POS Tagging
-    3. Chunking
-    4. Paradigm Checking (POS-aware)
-    5. Edit Distance Suggestions
-    """
-    
-    def __init__(self):
-        print("\n" + "="*70)
-        print("Enhanced Kannada Spell Checker")
-        print("Tokenization → POS → Chunking → Paradigm Checking")
-        print("="*70)
-        
-        self.running = True
-        self.last_clipboard = ""
-        self.check_count = 0
-        self.error_count = 0
-        
-        # Load components
+PRONOUN_VARIANT_GROUPS = [
+    {
+        "base_root": "avaru",
+        "base_prefix": "avar",
+        "variants": [
+            {"root": "avaru", "prefix": "avar"},
+            {"root": "ivaru", "prefix": "ivar"},
+            {"root": "yAru", "prefix": "yAr"},
+            {"root": "evaru", "prefix": "evar"},
+        ],
+    },
+    {
+        "base_root": "avanu",
+        "base_prefix": "avan",
+        "variants": [
+            {"root": "avanu", "prefix": "avan"},
+            {"root": "ivanu", "prefix": "ivan"},
+            {"root": "yAvanu", "prefix": "yAvan"},
+            {"root": "evanu", "prefix": "evan"},
+        ],
+    },
+    {
+        "base_root": "avalYu",
+        "base_prefix": "avalY",
+        "variants": [
+            {"root": "avalYu", "prefix": "avalY"},
+            {"root": "ivalYu", "prefix": "ivalY"},
+            {"root": "yAvalYu", "prefix": "yAvalY"},
+            {"root": "evalYu", "prefix": "evalY"},
+        ],
+    },
+    {
+        "base_root": "avu",
+        "base_prefix": "avu",
+        "variants": [
+            {"root": "avu", "prefix": "avu"},
+            {"root": "ivu", "prefix": "ivu"},
+            {"root": "yAvu", "prefix": "yAvu"},
+            {"root": "evu", "prefix": "evu"},
+        ],
+    },
+    {
+        "base_root": "axu",
+        "base_prefix": "ax",
+        "variants": [
+            {"root": "axu", "prefix": "ax"},
+            {"root": "ixu", "prefix": "ix"},
+            {"root": "yAvuxu", "prefix": "yAvux"},
+            {"root": "exu", "prefix": "ex"},
+        ],
+    },
+]
+
+PRONOUN_ROOTS = {
+    variant["root"]
+    for group in PRONOUN_VARIANT_GROUPS
+    for variant in group["variants"]
+}
+PRONOUN_ROOTS.update(group["base_root"] for group in PRONOUN_VARIANT_GROUPS)
+
+NOUN_VARIANT_GROUPS = [
+    {
+        "label": "akka_avva",
+        "base_root": "akka",
+        "variants": [
+            {"root": "avva"},
+        ],
+    },
+]
+
+PARADIGM_HEADER_PATTERN = re.compile(r"(?P<root>[A-Za-z]+)\((?P<tag>[A-Z]+\d*)\)")
+PARADIGM_FILENAME_PATTERN = re.compile(r"^(?P<root>.*?)(?P<tag>[A-Z]+\d*)$")
+
+
+class SimplifiedSpellChecker:
+    """Simplified spell checker - dictionary lookup only"""
+
+    def __init__(self) -> None:
+        print("\n" + "=" * 70)
+        print("Simplified Kannada Spell Checker")
+        print("Dictionary Lookup Only (No POS/Chunking)")
+        print("=" * 70)
+
+        self.tokenize_func = None
+        self._reset_paradigm_structures()
+
         self.load_tokenizer()
-        self.load_pos_tagger()
-        self.load_chunker()
-        self.load_paradigm_dictionary()
-        
-        print("\n✅ All components loaded successfully!")
-    
-    def load_tokenizer(self):
-        """Load tokenization module"""
-        print("\n[1/4] Loading Tokenizer...")
-        try:
-            sys.path.append(os.path.join(os.path.dirname(__file__), 'token'))
-            from tokenizer_for_indian_languages_on_files import tokenize_sentence
-            self.tokenize_func = tokenize_sentence
-            print("  ✅ Tokenizer loaded")
-        except Exception as e:
-            print(f"  ⚠️  Tokenizer not available: {e}")
-            print("  Using fallback tokenizer")
-            self.tokenize_func = None
-    
-    def load_pos_tagger(self):
-        """Load POS tagging model"""
-        print("\n[2/4] Loading POS Tagger...")
-        self.pos_tagger = None
-        self.pos_model_name = "Rule-based"
-        
-        try:
-            # Check if model exists
-            model_path = os.path.join(os.path.dirname(__file__), 'pos_tag', 'xlm-base-2')
-            if os.path.exists(model_path):
-                try:
-                    from transformers import AutoTokenizer, AutoModelForTokenClassification, pipeline
-                    print(f"  📦 Found model: {model_path}")
-                    print(f"  🔄 Loading xlm-base-2 transformer model...")
-                    
-                    tokenizer = AutoTokenizer.from_pretrained(model_path)
-                    model = AutoModelForTokenClassification.from_pretrained(model_path)
-                    self.pos_tagger = pipeline("token-classification", model=model, tokenizer=tokenizer, aggregation_strategy="simple")
-                    self.pos_model_name = "xlm-base-2 (HF Transformer)"
-                    
-                    print(f"  ✅ POS model loaded: xlm-base-2")
-                    print(f"  🎯 Using: Hugging Face Transformer Model")
-                except ImportError:
-                    print("  ⚠️  POS model found but transformers not installed")
-                    print("  💡 Run: pip install transformers torch")
-                    print("  📌 Using rule-based POS tagging")
-                except Exception as e:
-                    print(f"  ⚠️  Could not load POS model: {e}")
-                    print("  📌 Using rule-based POS tagging")
-            else:
-                print(f"  ℹ️  No POS model found at: pos_tag/xlm-base-2")
-                print(f"  📌 Using rule-based POS tagging")
-        except Exception as e:
-            print(f"  ⚠️  POS tagger error: {e}")
-            print("  📌 Using rule-based POS tagging")
-    
-    def load_chunker(self):
-        """Load chunking model"""
-        print("\n[3/4] Loading Chunker...")
-        self.chunker = None
-        self.chunk_model_name = "Rule-based"
-        
-        try:
-            chunk_path = os.path.join(os.path.dirname(__file__), 'chunk_tag', 'checkpoint-18381')
-            if os.path.exists(chunk_path):
-                try:
-                    from transformers import AutoTokenizer, AutoModelForTokenClassification, pipeline
-                    print(f"  📦 Found model: {chunk_path}")
-                    print(f"  🔄 Loading checkpoint-18381 transformer model...")
-                    
-                    tokenizer = AutoTokenizer.from_pretrained(chunk_path)
-                    model = AutoModelForTokenClassification.from_pretrained(chunk_path)
-                    self.chunker = pipeline("token-classification", model=model, tokenizer=tokenizer, aggregation_strategy="simple")
-                    self.chunk_model_name = "checkpoint-18381 (HF Transformer)"
-                    
-                    print(f"  ✅ Chunk model loaded: checkpoint-18381")
-                    print(f"  🎯 Using: Hugging Face Transformer Model")
-                except ImportError:
-                    print("  ⚠️  Chunk model found but transformers not installed")
-                    print("  💡 Run: pip install transformers torch")
-                    print("  📌 Using rule-based chunking")
-                except Exception as e:
-                    print(f"  ⚠️  Could not load Chunk model: {e}")
-                    print("  📌 Using rule-based chunking")
-            else:
-                print(f"  ℹ️  No Chunk model found at: chunk_tag/checkpoint-18381")
-                print(f"  📌 Using rule-based chunking")
-        except Exception as e:
-            print(f"  ⚠️  Chunker error: {e}")
-            print("  📌 Using rule-based chunking")
-    
-    def load_paradigm_dictionary(self):
-        """
-        Load paradigm files organized by POS tags
-        Structure: {POS_tag: {word: frequency}}
-        """
-        print("\n[4/4] Loading Paradigm Dictionary...")
-        
-        self.pos_paradigms = defaultdict(dict)
-        paradigm_base = 'paradigms'
-        
-        if not os.path.exists(paradigm_base):
-            print(f"  ❌ Paradigm directory not found: {paradigm_base}")
-            return
-        
-        # Map directories to POS tags
-        dir_to_pos = {
-            'Noun': 'NN',
-            'Verb': 'VB',
-            'Pronouns': 'PR'
+        self.load_dictionary()
+
+        print("\n[ready] Ready!")
+
+    def _reset_paradigm_structures(self) -> None:
+        """Reset paradigm-related caches"""
+        self.all_words: set[str] = set()
+        self.generated_variants: Dict[str, set[str]] = defaultdict(set)
+        self.pronoun_suffix_map: Dict[str, set[str]] = defaultdict(set)
+        self.pronoun_paradigms: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        self.word_to_paradigms: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        self._paradigm_cache: Dict[str, List[Dict[str, Any]]] = {}
+        self.paradigm_words: set[str] = set()
+        self.category_paradigms = self._init_category_paradigm_store()
+        self.category_suffixes = self._init_category_suffix_store()
+        self.root_categories: Dict[str, str] = {}
+
+    @staticmethod
+    def _init_category_paradigm_store() -> Dict[str, defaultdict]:
+        return {
+            "pronoun": defaultdict(list),
+            "noun": defaultdict(list),
+            "verb": defaultdict(list),
+            "other": defaultdict(list),
         }
-        
-        total_words = 0
-        
-        for dir_name, pos_tag in dir_to_pos.items():
-            dir_path = os.path.join(paradigm_base, dir_name)
-            if os.path.exists(dir_path):
-                words = {}
-                file_count = 0
-                
-                for root, _, files in os.walk(dir_path):
-                    for file in files:
-                        if file.endswith('.txt'):
-                            filepath = os.path.join(root, file)
-                            try:
-                                with open(filepath, 'r', encoding='utf-8') as f:
-                                    for line in f:
-                                        line = line.strip()
-                                        if line:
-                                            # Extract word (first column)
-                                            parts = line.split()
-                                            if parts:
-                                                word = parts[0]
-                                                words[word] = words.get(word, 0) + 1
-                                file_count += 1
-                            except Exception as e:
-                                pass
-                
-                if words:
-                    self.pos_paradigms[pos_tag] = words
-                    print(f"  {pos_tag} ({dir_name}): {len(words):,} words from {file_count} files")
-                    total_words += len(words)
-        
-        # Load extended dictionary from Excel files (if available)
-        extended_dict_path = 'extended_dictionary.pkl'
-        if os.path.exists(extended_dict_path):
-            try:
-                with open(extended_dict_path, 'rb') as f:
-                    extended_dict = pickle.load(f)
-                
-                excel_words = 0
-                for pos_tag, words in extended_dict.items():
-                    # Merge with existing paradigms
-                    for word, freq in words.items():
-                        if word not in self.pos_paradigms[pos_tag]:
-                            self.pos_paradigms[pos_tag][word] = freq
-                            excel_words += 1
-                
-                print(f"\n  📊 Extended dictionary loaded:")
-                print(f"     Added {excel_words:,} additional words from Excel files")
-            except Exception as e:
-                print(f"  ⚠️  Could not load extended dictionary: {e}")
-        
-        # Create combined dictionary for fallback
-        self.all_words = {}
-        for pos_dict in self.pos_paradigms.values():
-            self.all_words.update(pos_dict)
-        
-        print(f"\n  ✅ Total: {total_words:,} words across {len(self.pos_paradigms)} POS categories")
-        print(f"  ✅ Combined dictionary: {len(self.all_words):,} unique words")
-    
-    def tokenize(self, text):
-        """
-        STEP 1: Tokenization
-        Uses your token/tokenizer_for_indian_languages_on_files.py
-        """
+
+    @staticmethod
+    def _init_category_suffix_store() -> Dict[str, defaultdict]:
+        return {
+            "pronoun": defaultdict(set),
+            "noun": defaultdict(set),
+            "verb": defaultdict(set),
+            "other": defaultdict(set),
+        }
+
+    def load_tokenizer(self) -> None:
+        """Load tokenizer if available"""
+        print("\n[1/3] Loading tokenizer ...")
+        try:
+            sys.path.append(os.path.join(os.path.dirname(__file__), "Token"))
+            from tokenizer_for_indian_languages_on_files import tokenize_sentence
+
+            self.tokenize_func = tokenize_sentence
+            print("  [ok] Tokenizer loaded")
+        except Exception:
+            print("  [warn] Falling back to regex tokenizer")
+            self.tokenize_func = None
+
+    def load_dictionary(self) -> None:
+        """Load base dictionary and build temporary pronoun variants"""
+        print("\n[2/3] Loading dictionary ...")
+
+        self._reset_paradigm_structures()
+
+        paradigm_summary = self._scan_paradigm_files()
+        if paradigm_summary:
+            ordered = [
+                f"{name}:{paradigm_summary.get(name, 0)}"
+                for name in ("pronoun", "noun", "verb", "other")
+            ]
+            print(f"  [dict] Cached paradigms -> {' | '.join(ordered)}")
+
+        dict_path = "extended_dictionary.pkl"
+        if os.path.exists(dict_path):
+            with open(dict_path, "rb") as handle:
+                extended = pickle.load(handle)
+                if isinstance(extended, set):
+                    self.all_words.update(extended)
+                elif isinstance(extended, dict):
+                    for words in extended.values():
+                        if isinstance(words, set):
+                            self.all_words.update(words)
+                        elif isinstance(words, dict):
+                            self.all_words.update(words.keys())
+            print("  [dict] Loaded extended dictionary")
+
+        added_variants = self._augment_pronoun_variants()
+        if added_variants:
+            print(f"  [variants] Added {added_variants:,} pronoun variants (temporary)")
+
+        added_noun_variants = self._augment_noun_variants()
+        if added_noun_variants:
+            print(f"  [variants] Added {added_noun_variants:,} noun variants (temporary)")
+
+        print(f"  [dict] Paradigm words (with temp): {len(self.paradigm_words):,}")
+
+        print(f"\n  [total] {len(self.all_words):,} words")
+
+    def _scan_paradigm_files(self) -> Dict[str, int]:
+        """Read paradigm files into memory and categorize by word class"""
+        summary_sets: Dict[str, set[str]] = defaultdict(set)
+        paradigm_dir = os.path.join("paradigms", "all")
+        if not os.path.exists(paradigm_dir):
+            return {}
+
+        for file_path in glob(os.path.join(paradigm_dir, "*.txt")):
+            file_name = os.path.basename(file_path)
+            with open(file_path, "r", encoding="utf-8") as handle:
+                for raw_line in handle:
+                    line = raw_line.strip()
+                    if not line:
+                        continue
+
+                    parts = line.split(maxsplit=1)
+                    surface = parts[0]
+                    rule = parts[1] if len(parts) > 1 else ""
+
+                    root, tag = self._extract_root_and_tag(rule, file_name)
+                    category = self._resolve_category(root, tag)
+
+                    record = {
+                        "surface": surface,
+                        "rule": rule,
+                        "source_file": file_name,
+                        "tag": tag,
+                        "category": category,
+                    }
+
+                    self.all_words.add(surface)
+                    self.paradigm_words.add(surface)
+                    self._paradigm_cache.setdefault(root, []).append(record)
+                    self.category_paradigms[category][root].append(record)
+                    self.root_categories.setdefault(root, category)
+
+                    if surface.startswith(root):
+                        suffix = surface[len(root) :]
+                        if suffix:
+                            self.category_suffixes[category][root].add(suffix)
+
+                    summary_sets[category].add(root)
+
+        return {key: len(summary_sets.get(key, set())) for key in self.category_paradigms.keys()}
+
+    def _extract_root_and_tag(self, rule: str, file_name: str) -> tuple[str, str]:
+        """Derive root and tag information from a paradigm line or file name"""
+        match = PARADIGM_HEADER_PATTERN.search(rule)
+        if match:
+            return match.group("root"), match.group("tag")
+
+        stem = file_name.split("_", 1)[0]
+        fallback = PARADIGM_FILENAME_PATTERN.match(stem)
+        if fallback:
+            return fallback.group("root"), fallback.group("tag")
+
+        return stem, ""
+
+    def _resolve_category(self, root: str, tag: str) -> str:
+        """Map paradigm tag information to a coarse word class"""
+        if root in PRONOUN_ROOTS or "PN" in tag:
+            return "pronoun"
+
+        tag_upper = tag.upper()
+        if tag_upper.startswith("V") and not tag_upper.startswith("VN") and "PN" not in tag_upper:
+            return "verb"
+
+        if tag_upper.startswith("N") or tag_upper.startswith("VN") or tag_upper.startswith("EN") or tag_upper.startswith("IN"):
+            return "noun"
+
+        return self.root_categories.get(root, "other") or "other"
+
+    def get_paradigm_records(self, root: str, category: Optional[str] = None) -> List[Dict[str, str]]:
+        """Return cached paradigm records for a root, optionally restricted by category"""
+        if category:
+            return self.category_paradigms.get(category, {}).get(root, [])
+
+        for group in ("pronoun", "noun", "verb", "other"):
+            if root in self.category_paradigms[group]:
+                return self.category_paradigms[group][root]
+        return []
+
+    def create_paradigm_variants(
+        self,
+        base_root: str,
+        variant_root: str,
+        category: Optional[str] = None,
+        store: bool = True,
+        extra_metadata: Optional[Dict[str, str]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Generate paradigm variants for any category and optionally store them"""
+        base_records = self._load_paradigm_records(base_root)
+        if not base_records:
+            return []
+
+        resolved_category = category or self.root_categories.get(base_root, "other") or "other"
+        created: List[Dict[str, Any]] = []
+        seen_surfaces: set[str] = set()
+        metadata = extra_metadata or {}
+        existing_surfaces: set[str] = set()
+
+        if store:
+            existing_surfaces = {
+                entry["surface"]
+                for entry in self.category_paradigms[resolved_category][variant_root]
+            }
+
+        for record in base_records:
+            rule = record.get("rule", "")
+            surface = self._apply_paradigm_rule(base_root, variant_root, rule)
+            if not surface or surface in seen_surfaces:
+                continue
+
+            seen_surfaces.add(surface)
+            was_present = surface in self.all_words
+            info: Dict[str, Any] = {
+                "surface": surface,
+                "original_surface": record.get("surface", ""),
+                "rule": rule,
+                "source_file": record.get("source_file", ""),
+                "base_root": base_root,
+                "variant_root": variant_root,
+                "category": resolved_category,
+                "tag": record.get("tag", ""),
+                "is_new": not was_present,
+            }
+
+            if surface.startswith(variant_root):
+                suffix = surface[len(variant_root) :]
+                if suffix:
+                    info["suffix"] = suffix
+
+            if metadata:
+                info.update(metadata)
+
+            if store:
+                if not was_present:
+                    self.all_words.add(surface)
+                self.paradigm_words.add(surface)
+
+                if surface not in existing_surfaces:
+                    self.category_paradigms[resolved_category][variant_root].append(info)  # type: ignore[arg-type]
+                    existing_surfaces.add(surface)
+
+                self.root_categories.setdefault(variant_root, resolved_category)
+
+                suffix_value = info.get("suffix")
+                if suffix_value:
+                    self.category_suffixes[resolved_category][variant_root].add(suffix_value)  # type: ignore[arg-type]
+
+                word_records = self.word_to_paradigms[surface]
+                if not any(
+                    item.get("base_root") == base_root and item.get("variant_root") == variant_root
+                    for item in word_records
+                ):
+                    word_records.append(info)
+
+            created.append(info)
+
+        return created
+
+    def tokenize(self, text: str) -> List[str]:
+        """Tokenize text using configured tokenizer or fallback"""
         if self.tokenize_func:
             try:
-                tokens = self.tokenize_func(text, lang='kn')
-                return tokens
-            except:
+                return self.tokenize_func(text, lang="kn")
+            except Exception:
                 pass
-        
-        # Fallback: simple tokenization
-        # Split on whitespace and punctuation
-        tokens = re.findall(r'[\u0C80-\u0CFF]+|[a-zA-Z]+', text)
-        return [t for t in tokens if t.strip()]
-    
-    def pos_tag(self, tokens):
-        """
-        STEP 2: POS Tagging
-        Uses your pos_tag/xlm-base-2 model
-        For now: rule-based fallback with pronoun patterns
-        """
-        if self.pos_tagger:
-            # Use actual HF transformer model
-            print(f"  🎯 Using POS model: {self.pos_model_name}")
-            try:
-                text = " ".join(tokens)
-                results = self.pos_tagger(text)
-                pos_tagged = []
-                for i, token in enumerate(tokens):
-                    if i < len(results):
-                        pos = results[i]["entity_group"]
-                    else:
-                        pos = "NN"  # Default
-                    pos_tagged.append((token, pos))
-                return pos_tagged
-            except Exception as e:
-                print(f"  ⚠️  Model error, falling back to rule-based: {e}")
-        
-        # Rule-based fallback POS tagging
-        print(f"  🎯 Using POS method: {self.pos_model_name}")
-        pos_tagged = []
-        
-        # Pronoun stem patterns (from paradigm files)
-        pronoun_stems = [
-            'ivan', 'ival', 'ivar', 'iva', 'iv',  # ivanu, ivalu, ivaru (this person)
-            'avan', 'aval', 'avar', 'ava', 'av',  # avanu, avalu, avaru (that person)
-            'nAn', 'nAv', 'nIn', 'nIv',           # nAnu, nAvu, nInu, nIvu (I, we, you)
-            'wAn', 'wAv', 'Ad', 'ix', 'ex',       # wAnu, wAvu, Adu, ixu, exu (it)
-            'yAr', 'yAv', 'eV', 'A',              # yAru, yAvu, eVru (who, which)
-        ]
-        
-        # Verb suffixes (common verb endings)
-        verb_suffixes = ['ali', 'iri', 'udu', 'enu', 'aru', 'are', 'avu', 'ave', 
-                        'uwwA', 'uwaV', 'ida', 'ide', 'al', 'ir', 'uv']
-        
-        for token in tokens:
-            # Check if word exists in specific paradigm
-            if token in self.pos_paradigms.get('VB', {}):
-                pos = 'VB'
-            elif token in self.pos_paradigms.get('PR', {}):
-                pos = 'PR'
-            else:
-                # Use pattern matching for unknown words
-                pos = 'NN'  # Default to noun
-                
-                # Check pronoun patterns
-                for stem in pronoun_stems:
-                    if token.startswith(stem):
-                        pos = 'PR'
-                        break
-                
-                # Check verb patterns (if not already tagged as PR)
-                if pos == 'NN':
-                    for suffix in verb_suffixes:
-                        if token.endswith(suffix):
-                            pos = 'VB'
-                            break
-            
-            pos_tagged.append((token, pos))
-        
-        return pos_tagged
-    
-    def chunk(self, pos_tagged):
-        """
-        STEP 3: Chunking
-        Uses your chunk_tag/checkpoint-18381 model
-        For now: rule-based fallback
-        """
-        if self.chunker:
-            # Use actual HF transformer model
-            print(f"  🎯 Using Chunker model: {self.chunk_model_name}")
-            try:
-                tokens = [word for word, pos in pos_tagged]
-                text = " ".join(tokens)
-                results = self.chunker(text)
-                
-                chunks = []
-                current_np = []
-                
-                for i, (word, pos) in enumerate(pos_tagged):
-                    if i < len(results):
-                        chunk_tag = results[i]["entity_group"]
-                        if chunk_tag.startswith("B-"):
-                            if current_np:
-                                chunks.append(('NP', current_np))
-                                current_np = []
-                            current_np = [word]
-                        elif chunk_tag.startswith("I-"):
-                            current_np.append(word)
-                        else:
-                            if current_np:
-                                chunks.append(('NP', current_np))
-                                current_np = []
-                            chunks.append((pos, [word]))
-                    else:
-                        if pos == 'NN':
-                            current_np.append(word)
-                        else:
-                            if current_np:
-                                chunks.append(('NP', current_np))
-                                current_np = []
-                            chunks.append((pos, [word]))
-                
-                if current_np:
-                    chunks.append(('NP', current_np))
-                
-                return chunks
-            except Exception as e:
-                print(f"  ⚠️  Model error, falling back to rule-based: {e}")
-        
-        # Simple noun phrase chunking
-        print(f"  🎯 Using Chunker method: {self.chunk_model_name}")
-        chunks = []
-        current_np = []
-        
-        for word, pos in pos_tagged:
-            if pos == 'NN':
-                current_np.append(word)
-            else:
-                if current_np:
-                    chunks.append(('NP', current_np))
-                    current_np = []
-                chunks.append((pos, [word]))
-        
-        if current_np:
-            chunks.append(('NP', current_np))
-        
-        return chunks
-    
-    def check_against_paradigm(self, word, pos_tag):
-        """
-        STEP 4: Paradigm Checking
-        Check if word exists in paradigm for given POS tag
-        Returns: (is_correct, suggestions)
-        """
-        # Strict category check: only mark correct if the word is present under its POS
-        if pos_tag in self.pos_paradigms and word in self.pos_paradigms[pos_tag]:
-            return True, []
+        return re.findall(r"[\u0C80-\u0CFF]+|[a-zA-Z]+", text)
 
-        # Start with category-scoped suggestions
-        same_pos_candidates = self.pos_paradigms.get(pos_tag, {})
-        suggestions = self.get_suggestions(word, same_pos_candidates, max_suggestions=10)
-
-        # Pronoun-specific bridging to keep i-/a- stems aligned with paradigm data
-        if pos_tag == 'PR':
-            bridged = self._pronoun_bridge_suggestions(word)
-            if bridged:
-                seen = set()
-                ordered = []
-                for candidate in bridged + suggestions:
-                    if candidate not in seen:
-                        ordered.append(candidate)
-                        seen.add(candidate)
-                suggestions = ordered[:10]
-
-        # Backfill with cross-POS suggestions only if we still need more options
-        if len(suggestions) < 10:
-            remaining = 10 - len(suggestions)
-            cross_pos = self.get_suggestions(word, self.all_words, max_suggestions=remaining)
-            cross_pos = [w for w in cross_pos if w not in suggestions]
-            suggestions.extend(cross_pos)
-
-        return False, suggestions
-
-    def _pronoun_bridge_suggestions(self, word):
-        """Generate pronoun suggestions that respect i↔a stem swaps while
-        preserving suffix expectations such as ali↔alli."""
-        pr_dict = self.pos_paradigms.get('PR', {})
-        if not word or not pr_dict:
-            return []
-
-        from itertools import count
-
-        ranking = {}
-        order_counter = count()
-
-        def add_candidate(value, priority):
-            if not value:
-                return
-            if value in ranking:
-                current_priority, order = ranking[value]
-                if priority < current_priority:
-                    ranking[value] = (priority, order)
-            else:
-                ranking[value] = (priority, next(order_counter))
-
-        original_prefix = 'i' if word.startswith('i') else 'a' if word.startswith('a') else None
-        swap_prefix = None
-        if original_prefix == 'i':
-            swap_prefix = 'a'
-        elif original_prefix == 'a':
-            swap_prefix = 'i'
-
-        # Handle common ali↔alli toggles when the swapped form exists in paradigms
-        suffix_pairs = [('ali', 'alli'), ('alli', 'ali')]
-        for src_suffix, dst_suffix in suffix_pairs:
-            if word.endswith(src_suffix):
-                alt_form = word[:-len(src_suffix)] + dst_suffix
-                swapped_alt = None
-                if swap_prefix and len(word) > 1:
-                    swapped_alt = swap_prefix + word[1:-len(src_suffix)] + dst_suffix
-                if swapped_alt and swapped_alt in pr_dict:
-                    add_candidate(alt_form, 0)
-                elif alt_form in pr_dict:
-                    add_candidate(alt_form, 0)
-
-        # Look at the swapped stem inside PR dictionary and project suggestions back
-        if swap_prefix and len(word) > 1:
-            swapped_word = swap_prefix + word[1:]
-            if swapped_word in pr_dict:
-                add_candidate(swapped_word, 2)
-
-            # Pull suggestions for the swapped word within the pronoun dictionary
-            swapped_suggestions = self.get_suggestions(swapped_word, pr_dict, max_suggestions=10)
-            for suggestion in swapped_suggestions:
-                add_candidate(suggestion, 3)
-                if suggestion.startswith(swap_prefix):
-                    reverted = original_prefix + suggestion[1:] if original_prefix else suggestion
-                    add_candidate(reverted, 1)
-
-        # If we are still short on ideas, fall back to edit distance within PR
-        if len(ranking) < 5:
-            backup = self.get_suggestions(word, pr_dict, max_suggestions=5)
-            for suggestion in backup:
-                add_candidate(suggestion, 4)
-
-        ordered = [value for value, _ in sorted(ranking.items(), key=lambda item: (item[1][0], item[1][1]))]
-        return ordered
-    
-    def levenshtein_distance(self, s1, s2):
-        """Calculate Levenshtein edit distance"""
+    def edit_distance(self, s1: str, s2: str) -> int:
+        """Levenshtein distance"""
         if len(s1) < len(s2):
-            return self.levenshtein_distance(s2, s1)
-        
-        if len(s2) == 0:
+            return self.edit_distance(s2, s1)
+        if not s2:
             return len(s1)
-        
-        previous_row = range(len(s2) + 1)
+
+        previous = list(range(len(s2) + 1))
         for i, c1 in enumerate(s1):
-            current_row = [i + 1]
+            current = [i + 1]
             for j, c2 in enumerate(s2):
-                insertions = previous_row[j + 1] + 1
-                deletions = current_row[j] + 1
-                substitutions = previous_row[j] + (c1 != c2)
-                current_row.append(min(insertions, deletions, substitutions))
-            previous_row = current_row
-        
-        return previous_row[-1]
-    
-    def get_suggestions(self, word, paradigm, max_suggestions=10, max_distance=3):
-        """
-        STEP 5: Edit Distance Suggestions
-        Get spelling suggestions from paradigm
-        Increased to edit distance 3 for better suggestions
-        """
-        suggestions = []
-        
-        # Filter candidates by length (more lenient)
-        candidates = [
-            w for w in paradigm.keys()
-            if abs(len(w) - len(word)) <= max_distance + 1
-        ]
-        
-        # Calculate distances
-        for candidate in candidates:
-            distance = self.levenshtein_distance(word, candidate)
-            if distance <= max_distance:
-                freq = paradigm.get(candidate, 0)
-                suggestions.append((candidate, distance, freq))
-        
-        # Sort by distance (ascending), then frequency (descending)
-        suggestions.sort(key=lambda x: (x[1], -x[2]))
-        
-        return [s[0] for s in suggestions[:max_suggestions]]
-    
-    def check_text(self, text):
-        """
-        Full NLP Pipeline:
-        Tokenize → POS Tag → Chunk → Check Paradigms → Get Suggestions
-        Automatically converts Kannada Unicode to WX transliteration
-        """
-        print(f"\n{'='*70}")
+                current.append(min(previous[j + 1] + 1, current[j] + 1, previous[j] + (c1 != c2)))
+            previous = current
+        return previous[-1]
+
+    def get_suggestions(self, word: str, max_results: int = 10) -> List[str]:
+        """Get edit-distance suggestions for a word"""
+        candidates = [(candidate, self.edit_distance(word, candidate)) for candidate in self.all_words]
+        filtered = [item for item in candidates if item[1] <= 2]
+        filtered.sort(key=lambda item: (item[1], item[0]))
+        return [candidate for candidate, _ in filtered[:max_results]]
+
+    def get_pronoun_paradigms(self, word: str) -> List[Dict[str, Any]]:
+        """Return cached paradigm entries for a generated pronoun surface"""
+        return self.word_to_paradigms.get(word, [])
+
+    def check_text(self, text: str) -> List[Dict[str, List[str]]]:
+        """Check text for spelling errors"""
+        print(f"\n{'=' * 70}")
         print(f"Processing: {text[:50]}...")
-        print(f"{'='*70}")
-        
-        # STEP 0: Convert Kannada to WX if needed
-        if is_kannada_text(text):
-            print("\n[STEP 0] Converting Kannada Unicode to WX...")
-            original_text = text
+        print(f"{'=' * 70}")
+
+        was_kannada = is_kannada_text(text)
+        if was_kannada:
+            print("\n[step 0] Converting Kannada to WX ...")
             text = kannada_to_wx(text)
-            print(f"  Original: {original_text[:100]}")
-            print(f"  WX: {text}")
-        
-        # STEP 1: Tokenization
-        print("\n[STEP 1] Tokenizing...")
+            print(f"  wx: {text}")
+
+        print("\n[step 1] Tokenizing ...")
         tokens = self.tokenize(text)
-        print(f"  Tokens: {tokens}")
-        
-        if not tokens:
-            return []
-        
-        # STEP 2: POS Tagging
-        print("\n[STEP 2] POS Tagging...")
-        pos_tagged = self.pos_tag(tokens)
-        for word, pos in pos_tagged:
-            print(f"  {word} → {pos}")
-        
-        # STEP 3: Chunking
-        print("\n[STEP 3] Chunking...")
-        chunks = self.chunk(pos_tagged)
-        for chunk_type, words in chunks:
-            print(f"  [{chunk_type}: {' '.join(words)}]")
-        
-        # STEP 4 & 5: Check against paradigms and get suggestions
-        print("\n[STEP 4-5] Checking Paradigms & Getting Suggestions...")
-        errors = []
-        
-        for word, pos_tag in pos_tagged:
-            # Skip very short words
+        print(f"  tokens: {tokens}")
+
+        print("\n[step 2] Checking ...")
+        errors: List[Dict[str, List[str]]] = []
+
+        for word in tokens:
             if len(word) <= 1:
                 continue
-            
-            # Check word against paradigm for its POS
-            is_correct, suggestions = self.check_against_paradigm(word, pos_tag)
-            
-            if not is_correct:
-                print(f"  ❌ {word} ({pos_tag}): {', '.join(suggestions) if suggestions else 'No suggestions'}")
-                errors.append({
-                    'word': word,
-                    'pos': pos_tag,
-                    'suggestions': suggestions
-                })
-            else:
-                print(f"  ✅ {word} ({pos_tag}): Correct")
-        
+
+            if word in self.all_words:
+                print(f"  [ok] {word}: in dictionary")
+                continue
+
+            suggestions = self.get_suggestions(word)
+            if was_kannada:
+                suggestions = [wx_to_kannada(item) for item in suggestions]
+
+            display = ", ".join(suggestions[:5]) if suggestions else "No suggestions"
+            print(f"  [miss] {word}: {display}")
+            errors.append({"word": word, "suggestions": suggestions})
+
         return errors
-    
-    def show_notification(self, title, message, timeout=5):
-        """Show system notification"""
-        if HAS_NOTIFICATIONS:
-            try:
-                notification.notify(
-                    title=title,
-                    message=message,
-                    app_name="Kannada Spell Checker",
-                    timeout=timeout
+
+    def _augment_pronoun_variants(self) -> int:
+        """Generate temporary pronoun variants and cache paradigm entries"""
+        new_words: set[str] = set()
+
+        for group in PRONOUN_VARIANT_GROUPS:
+            base_root = group["base_root"]
+            if not self._load_paradigm_records(base_root):
+                continue
+
+            for variant in group["variants"]:
+                variant_root = variant["root"]
+                variant_prefix = variant["prefix"]
+
+                infos = self.create_paradigm_variants(
+                    base_root,
+                    variant_root,
+                    category="pronoun",
+                    store=True,
+                    extra_metadata={"variant_prefix": variant_prefix},
                 )
-            except Exception as e:
-                pass
-        
-        # Always print to console
-        print(f"\n📢 {title}")
-        print(f"   {message}")
-    
-    def monitor_clipboard(self):
-        """Monitor clipboard for Kannada text"""
-        print("\n" + "="*70)
-        print("📋 CLIPBOARD MONITORING STARTED")
-        print("="*70)
-        print("\n📝 How to use:")
-        print("  1. Open ANY editor (Notepad, Word, VS Code, Browser)")
-        print("  2. Type Kannada text")
-        print("  3. Select and COPY the text (Ctrl+C)")
-        print("  4. Get instant spell check with POS-aware suggestions!")
-        print("\n⚠️  Press Ctrl+C to stop the service")
-        print("="*70 + "\n")
-        
-        while self.running:
-            try:
-                current = pyperclip.paste()
-                
-                # Check if clipboard changed
-                if current != self.last_clipboard and current.strip():
-                    # Check if contains Kannada Unicode or non-ASCII text
-                    has_kannada = any('\u0C80' <= c <= '\u0CFF' for c in current)
-                    has_text = any(ord(c) > 127 for c in current)
-                    
-                    if has_kannada or has_text:
-                        self.check_count += 1
-                        
-                        print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Check #{self.check_count}")
-                        
-                        # Run full pipeline
-                        errors = self.check_text(current)
-                        
-                        # Show results
-                        if errors:
-                            self.error_count += len(errors)
-                            
-                            print(f"\n{'='*70}")
-                            print(f"❌ FOUND {len(errors)} ERROR(S)")
-                            print(f"{'='*70}")
-                            
-                            # Show notifications for first 3 errors
-                            for i, error in enumerate(errors[:3], 1):
-                                word = error['word']
-                                pos = error['pos']
-                                suggestions = error['suggestions']
-                                
-                                title = f"❌ Error {i}/{len(errors)}: {word} ({pos})"
-                                if suggestions:
-                                    message = f"Suggestions: {', '.join(suggestions[:3])}"
-                                else:
-                                    message = "No suggestions found"
-                                
-                                self.show_notification(title, message, 5)
-                                time.sleep(0.5)
-                            
-                            if len(errors) > 3:
-                                self.show_notification(
-                                    f"ℹ️ {len(errors)-3} More Error(s)",
-                                    "Check console for details",
-                                    3
-                                )
-                        else:
-                            print(f"\n{'='*70}")
-                            print("✅ NO ERRORS - ALL WORDS CORRECT!")
-                            print(f"{'='*70}")
-                            
-                            self.show_notification(
-                                "✅ Perfect Spelling!",
-                                "No errors found in your text",
-                                3
-                            )
-                    
-                    self.last_clipboard = current
-                
-            except Exception as e:
-                print(f"\n⚠️  Error: {e}")
-                import traceback
-                traceback.print_exc()
-            
-            time.sleep(1)  # Check every second
-    
-    def run(self):
-        """Start the service"""
-        try:
-            self.monitor_clipboard()
-        except KeyboardInterrupt:
-            print("\n\n" + "="*70)
-            print("STOPPING SERVICE")
-            print("="*70)
-            self.stop()
-    
-    def stop(self):
-        """Stop the service"""
-        self.running = False
-        
-        print(f"\n📊 Session Statistics:")
-        print(f"  Checks performed: {self.check_count}")
-        print(f"  Total errors found: {self.error_count}")
-        
-        print("\n✅ Service stopped successfully")
-        print("="*70 + "\n")
+
+                existing = {entry["surface"] for entry in self.pronoun_paradigms[variant_root]}
+
+                for info in infos:
+                    surface = info["surface"]
+                    if info.get("is_new"):
+                        new_words.add(surface)
+
+                    original = info.get("original_surface")
+                    if isinstance(original, str) and original:
+                        self.generated_variants[surface].add(original)
+
+                    if surface.startswith(variant_prefix):
+                        suffix = surface[len(variant_prefix) :]
+                        if suffix:
+                            self.pronoun_suffix_map[variant_prefix].add(suffix)
+
+                    if surface not in existing:
+                        self.pronoun_paradigms[variant_root].append(info)
+                        existing.add(surface)
+
+        return len(new_words)
+
+    def _augment_noun_variants(self) -> int:
+        """Generate temporary noun variants defined in NOUN_VARIANT_GROUPS"""
+        new_words: set[str] = set()
+
+        for group in NOUN_VARIANT_GROUPS:
+            base_root = group["base_root"]
+            if not self._load_paradigm_records(base_root):
+                continue
+
+            label = group.get("label", base_root)
+
+            for variant in group.get("variants", []):
+                variant_root = variant.get("root")
+                if not variant_root:
+                    continue
+
+                infos = self.create_paradigm_variants(
+                    base_root,
+                    variant_root,
+                    category="noun",
+                    store=True,
+                    extra_metadata={
+                        "variant_group": label,
+                        "variant_type": variant.get("type", "noun_variant"),
+                    },
+                )
+
+                for info in infos:
+                    if info.get("is_new"):
+                        new_words.add(info["surface"])
+
+        return len(new_words)
+
+    def _load_paradigm_records(self, base_root: str) -> List[Dict[str, str]]:
+        """Load paradigm lines for a base root with caching"""
+        if base_root in self._paradigm_cache:
+            return self._paradigm_cache[base_root]
+
+        records: List[Dict[str, str]] = []
+        pattern = os.path.join("paradigms", "all", f"{base_root}*.txt")
+        for file_path in glob(pattern):
+            with open(file_path, "r", encoding="utf-8") as handle:
+                for line in handle:
+                    parts = line.strip().split(maxsplit=1)
+                    if not parts:
+                        continue
+                    surface = parts[0]
+                    rule = parts[1] if len(parts) > 1 else ""
+                    records.append({
+                        "surface": surface,
+                        "rule": rule,
+                        "source_file": os.path.basename(file_path),
+                    })
+
+        self._paradigm_cache[base_root] = records
+        return records
+
+    @staticmethod
+    def _apply_paradigm_rule(base_root: str, variant_root: str, rule: str) -> str:
+        """Apply a paradigm rule to transform base_root forms into variant_root forms"""
+        if not rule:
+            return variant_root
+
+        word = variant_root
+        for segment in rule.split("+"):
+            if "_" not in segment:
+                continue
+
+            left, right = segment.split("_", 1)
+
+            if "#" in right:
+                word = word + left
+                continue
+
+            if "_" in right:
+                base_piece, feat = right.split("_", 1)
+            else:
+                base_piece, feat = right, ""
+
+            if base_piece and word.endswith(base_piece):
+                word = word[: -len(base_piece)] + left
+            else:
+                word = word + left
+
+            if feat:
+                parts = feat.split("_")
+                if len(parts) >= 2:
+                    add_piece, old_piece = parts[0], parts[1]
+                    if old_piece and word.endswith(old_piece):
+                        word = word[: -len(old_piece)] + add_piece
+                    else:
+                        word = word + add_piece
+
+        return word
 
 
-def main():
-    """Main entry point"""
-    try:
-        service = EnhancedSpellChecker()
-        service.run()
-    except Exception as e:
-        print(f"\n❌ Fatal Error: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
+# Alias for backward compatibility
+EnhancedSpellChecker = SimplifiedSpellChecker
 
 
 if __name__ == "__main__":
-    main()
+    checker = SimplifiedSpellChecker()
+
+    print("\n[3/3] Sample checks ...")
+    tests = [
+        "nAnu bengalUralli iruwweVneV",
+        "ನಾನು ಬೆಂಗಳೂರಲ್ಲಿ ಇರುತ್ತೇನೆ",
+        "avarannu ivarannu yArannu",
+    ]
+
+    for sample in tests:
+        result = checker.check_text(sample)
+        status = "[ok] No errors" if not result else f"[issues] {len(result)} error(s)"
+        print(f"\n{status}")
