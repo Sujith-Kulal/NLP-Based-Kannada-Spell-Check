@@ -81,31 +81,73 @@ class EnhancedSpellChecker:
     def load_pos_tagger(self):
         """Load POS tagging model"""
         print("\n[2/4] Loading POS Tagger...")
+        self.pos_tagger = None
+        self.pos_model_name = "Rule-based"
+        
         try:
             # Check if model exists
             model_path = os.path.join(os.path.dirname(__file__), 'pos_tag', 'xlm-base-2')
             if os.path.exists(model_path):
-                print("  ⚠️  POS model found but not loading (requires transformers)")
-                print("  Using rule-based POS tagging")
-            self.pos_tagger = None
+                try:
+                    from transformers import AutoTokenizer, AutoModelForTokenClassification, pipeline
+                    print(f"  📦 Found model: {model_path}")
+                    print(f"  🔄 Loading xlm-base-2 transformer model...")
+                    
+                    tokenizer = AutoTokenizer.from_pretrained(model_path)
+                    model = AutoModelForTokenClassification.from_pretrained(model_path)
+                    self.pos_tagger = pipeline("token-classification", model=model, tokenizer=tokenizer, aggregation_strategy="simple")
+                    self.pos_model_name = "xlm-base-2 (HF Transformer)"
+                    
+                    print(f"  ✅ POS model loaded: xlm-base-2")
+                    print(f"  🎯 Using: Hugging Face Transformer Model")
+                except ImportError:
+                    print("  ⚠️  POS model found but transformers not installed")
+                    print("  💡 Run: pip install transformers torch")
+                    print("  📌 Using rule-based POS tagging")
+                except Exception as e:
+                    print(f"  ⚠️  Could not load POS model: {e}")
+                    print("  📌 Using rule-based POS tagging")
+            else:
+                print(f"  ℹ️  No POS model found at: pos_tag/xlm-base-2")
+                print(f"  📌 Using rule-based POS tagging")
         except Exception as e:
-            print(f"  ⚠️  POS tagger not available: {e}")
-        
-        self.pos_tagger = None
+            print(f"  ⚠️  POS tagger error: {e}")
+            print("  📌 Using rule-based POS tagging")
     
     def load_chunker(self):
         """Load chunking model"""
         print("\n[3/4] Loading Chunker...")
+        self.chunker = None
+        self.chunk_model_name = "Rule-based"
+        
         try:
             chunk_path = os.path.join(os.path.dirname(__file__), 'chunk_tag', 'checkpoint-18381')
             if os.path.exists(chunk_path):
-                print("  ⚠️  Chunk model found but not loading (requires transformers)")
-                print("  Using rule-based chunking")
-            self.chunker = None
+                try:
+                    from transformers import AutoTokenizer, AutoModelForTokenClassification, pipeline
+                    print(f"  📦 Found model: {chunk_path}")
+                    print(f"  🔄 Loading checkpoint-18381 transformer model...")
+                    
+                    tokenizer = AutoTokenizer.from_pretrained(chunk_path)
+                    model = AutoModelForTokenClassification.from_pretrained(chunk_path)
+                    self.chunker = pipeline("token-classification", model=model, tokenizer=tokenizer, aggregation_strategy="simple")
+                    self.chunk_model_name = "checkpoint-18381 (HF Transformer)"
+                    
+                    print(f"  ✅ Chunk model loaded: checkpoint-18381")
+                    print(f"  🎯 Using: Hugging Face Transformer Model")
+                except ImportError:
+                    print("  ⚠️  Chunk model found but transformers not installed")
+                    print("  💡 Run: pip install transformers torch")
+                    print("  📌 Using rule-based chunking")
+                except Exception as e:
+                    print(f"  ⚠️  Could not load Chunk model: {e}")
+                    print("  📌 Using rule-based chunking")
+            else:
+                print(f"  ℹ️  No Chunk model found at: chunk_tag/checkpoint-18381")
+                print(f"  📌 Using rule-based chunking")
         except Exception as e:
-            print(f"  ⚠️  Chunker not available: {e}")
-        
-        self.chunker = None
+            print(f"  ⚠️  Chunker error: {e}")
+            print("  📌 Using rule-based chunking")
     
     def load_paradigm_dictionary(self):
         """
@@ -211,10 +253,24 @@ class EnhancedSpellChecker:
         For now: rule-based fallback with pronoun patterns
         """
         if self.pos_tagger:
-            # Use actual model
-            pass
+            # Use actual HF transformer model
+            print(f"  🎯 Using POS model: {self.pos_model_name}")
+            try:
+                text = " ".join(tokens)
+                results = self.pos_tagger(text)
+                pos_tagged = []
+                for i, token in enumerate(tokens):
+                    if i < len(results):
+                        pos = results[i]["entity_group"]
+                    else:
+                        pos = "NN"  # Default
+                    pos_tagged.append((token, pos))
+                return pos_tagged
+            except Exception as e:
+                print(f"  ⚠️  Model error, falling back to rule-based: {e}")
         
         # Rule-based fallback POS tagging
+        print(f"  🎯 Using POS method: {self.pos_model_name}")
         pos_tagged = []
         
         # Pronoun stem patterns (from paradigm files)
@@ -264,10 +320,49 @@ class EnhancedSpellChecker:
         For now: rule-based fallback
         """
         if self.chunker:
-            # Use actual model
-            pass
+            # Use actual HF transformer model
+            print(f"  🎯 Using Chunker model: {self.chunk_model_name}")
+            try:
+                tokens = [word for word, pos in pos_tagged]
+                text = " ".join(tokens)
+                results = self.chunker(text)
+                
+                chunks = []
+                current_np = []
+                
+                for i, (word, pos) in enumerate(pos_tagged):
+                    if i < len(results):
+                        chunk_tag = results[i]["entity_group"]
+                        if chunk_tag.startswith("B-"):
+                            if current_np:
+                                chunks.append(('NP', current_np))
+                                current_np = []
+                            current_np = [word]
+                        elif chunk_tag.startswith("I-"):
+                            current_np.append(word)
+                        else:
+                            if current_np:
+                                chunks.append(('NP', current_np))
+                                current_np = []
+                            chunks.append((pos, [word]))
+                    else:
+                        if pos == 'NN':
+                            current_np.append(word)
+                        else:
+                            if current_np:
+                                chunks.append(('NP', current_np))
+                                current_np = []
+                            chunks.append((pos, [word]))
+                
+                if current_np:
+                    chunks.append(('NP', current_np))
+                
+                return chunks
+            except Exception as e:
+                print(f"  ⚠️  Model error, falling back to rule-based: {e}")
         
         # Simple noun phrase chunking
+        print(f"  🎯 Using Chunker method: {self.chunk_model_name}")
         chunks = []
         current_np = []
         
