@@ -153,21 +153,29 @@ class EnhancedSpellChecker:
         """
         Load paradigm files organized by POS tags
         Structure: {POS_tag: {word: frequency}}
+        Also loads paradigm rules for generation
         """
         print("\n[4/4] Loading Paradigm Dictionary...")
         
         self.pos_paradigms = defaultdict(dict)
+        self.category_paradigms = {"verb": {}, "noun": {}, "pronoun": {}}
         paradigm_base = 'paradigms'
         
         if not os.path.exists(paradigm_base):
             print(f"  ❌ Paradigm directory not found: {paradigm_base}")
             return
         
-        # Map directories to POS tags
+        # Map directories to POS tags and categories
         dir_to_pos = {
             'Noun': 'NN',
             'Verb': 'VB',
             'Pronouns': 'PR'
+        }
+        
+        dir_to_category = {
+            'Noun': 'noun',
+            'Verb': 'verb',
+            'Pronouns': 'pronoun'
         }
         
         total_words = 0
@@ -177,6 +185,7 @@ class EnhancedSpellChecker:
             if os.path.exists(dir_path):
                 words = {}
                 file_count = 0
+                category = dir_to_category[dir_name]
                 
                 for root, _, files in os.walk(dir_path):
                     for file in files:
@@ -187,11 +196,28 @@ class EnhancedSpellChecker:
                                     for line in f:
                                         line = line.strip()
                                         if line:
-                                            # Extract word (first column)
+                                            # Extract word (first column) and rule (second column)
                                             parts = line.split()
                                             if parts:
                                                 word = parts[0]
                                                 words[word] = words.get(word, 0) + 1
+                                                
+                                                # Parse paradigm rule for generation
+                                                if len(parts) >= 2:
+                                                    rule_str = parts[1]
+                                                    # Extract base root from rule: base(Type)+rule
+                                                    if '(' in rule_str and ')' in rule_str:
+                                                        base_root = rule_str.split('(')[0]
+                                                        # Extract the rule part after the base(Type)
+                                                        rule_part = rule_str.split(')')[1] if ')' in rule_str else ''
+                                                        
+                                                        if base_root not in self.category_paradigms[category]:
+                                                            self.category_paradigms[category][base_root] = []
+                                                        
+                                                        self.category_paradigms[category][base_root].append({
+                                                            'surface': word,
+                                                            'rule': rule_part
+                                                        })
                                 file_count += 1
                             except Exception as e:
                                 pass
@@ -228,6 +254,126 @@ class EnhancedSpellChecker:
         
         print(f"\n  ✅ Total: {total_words:,} words across {len(self.pos_paradigms)} POS categories")
         print(f"  ✅ Combined dictionary: {len(self.all_words):,} unique words")
+        
+        # Show paradigm rule statistics
+        total_rules = sum(len(rules) for cat_rules in self.category_paradigms.values() for rules in cat_rules.values())
+        total_roots = sum(len(cat_rules) for cat_rules in self.category_paradigms.values())
+        print(f"  ✅ Loaded {total_rules:,} paradigm rules for {total_roots} base roots")
+        
+        # Auto-generate full paradigms
+        self.auto_generate_full_paradigms()
+    
+    def _apply_paradigm_rule(self, base_root: str, variant_root: str, rule: str) -> str:
+        """
+        Apply a full morphological paradigm rule recursively (Flask-compatible).
+        Handles + and _ segment chains and multiple morphological layers.
+        
+        Args:
+            base_root: Original base root from paradigm file
+            variant_root: Current variant being built
+            rule: Rule string like "+xa_#_PAST+anu_a_3SM"
+        
+        Returns:
+            Generated surface form
+        
+        Rule format:
+            +morpheme1_placeholder_tag+morpheme2_placeholder_tag
+        where:
+            - morpheme is what gets added/replaced
+            - placeholder can be # or the morpheme to replace
+            - tag is metadata (tense, person, etc.)
+        """
+        if not rule:
+            return variant_root
+
+        word = variant_root.strip()
+        rule = rule.strip()
+
+        # Split multiple + segments
+        segments = [seg.strip() for seg in rule.split('+') if seg.strip()]
+        
+        for seg in segments:
+            # Handle (a_b_c_d...) recursive sequences
+            parts = seg.split('_')
+            
+            # Remove # symbols and filter empty strings
+            cleaned = [p for p in parts if p and p != '#']
+            
+            # If nothing left after cleaning, skip this segment
+            if not cleaned:
+                continue
+            
+            # First part is the morpheme to add
+            # Second part (if exists and not a tag) might be what to replace
+            if len(cleaned) == 1:
+                # Simple append: just the morpheme
+                word += cleaned[0]
+            elif len(cleaned) >= 2:
+                morpheme = cleaned[0]
+                placeholder = cleaned[1]
+                
+                # Check if placeholder is actually a replacement target
+                # (not an ALL_CAPS tag like PAST, FUT, etc.)
+                if placeholder.isupper() or placeholder[0].isupper():
+                    # It's a tag, not a replacement - just append the morpheme
+                    word += morpheme
+                else:
+                    # Try to replace the placeholder with the morpheme
+                    if word.endswith(placeholder):
+                        word = word[:-len(placeholder)] + morpheme
+                    else:
+                        # Placeholder not found at end, just append
+                        word += morpheme
+
+        return word
+    
+    def expand_all_paradigms(self, root: str):
+        """
+        Generate all possible paradigm variants (Verb/Noun/Pronoun) for a given base.
+        
+        Args:
+            root: Base root to expand
+        
+        Returns:
+            Set of all generated surface forms
+        """
+        all_forms = set()
+        categories = ["verb", "noun", "pronoun"]
+        
+        for cat in categories:
+            base_records = self.category_paradigms[cat].get(root, [])
+            for rec in base_records:
+                new_word = self._apply_paradigm_rule(root, root, rec["rule"])
+                all_forms.add(new_word)
+        
+        return all_forms
+    
+    def auto_generate_full_paradigms(self):
+        """
+        Pre-build all paradigms for every base root and add to dictionary.
+        This generates the complete paradigm dictionary in memory.
+        """
+        print("\n  🔄 Auto-generating full paradigms...")
+        
+        generated_count = 0
+        
+        for cat in ("verb", "noun", "pronoun"):
+            for root in self.category_paradigms[cat].keys():
+                for record in self.category_paradigms[cat][root]:
+                    surface = self._apply_paradigm_rule(root, root, record["rule"])
+                    if surface not in self.all_words:
+                        self.all_words[surface] = 1
+                        generated_count += 1
+                        
+                        # Also add to appropriate POS paradigm
+                        if cat == "verb" and surface not in self.pos_paradigms['VB']:
+                            self.pos_paradigms['VB'][surface] = 1
+                        elif cat == "noun" and surface not in self.pos_paradigms['NN']:
+                            self.pos_paradigms['NN'][surface] = 1
+                        elif cat == "pronoun" and surface not in self.pos_paradigms['PR']:
+                            self.pos_paradigms['PR'][surface] = 1
+        
+        print(f"  ✅ Generated {generated_count:,} additional paradigm forms")
     
     def tokenize(self, text):
         """
