@@ -113,7 +113,7 @@ class SimplifiedSpellChecker:
     def __init__(self, use_paradigm_generator: bool = True) -> None:
         print("\n" + "=" * 70)
         print("Simplified Kannada Spell Checker")
-        print("Dictionary Lookup Only (No POS/Chunking)")
+        print("Dictionary Lookup + Dynamic Morphological Paradigm Expansion")
         print("=" * 70)
 
         self.tokenize_func = None
@@ -127,18 +127,57 @@ class SimplifiedSpellChecker:
         self.morphological_paradigms = None
         self.use_morphological_paradigms = MORPHOLOGICAL_PARADIGM_AVAILABLE
 
+        # 1️⃣ Load tokenizer and dictionary
         self.load_tokenizer()
         self.load_dictionary()
         
-        # Initialize paradigm generator if available and enabled
+        # 2️⃣ Initialize optional paradigm systems if available
         if self.use_paradigm_generator:
             self._initialize_paradigm_generator()
-        
-        # Initialize morphological paradigm system if available
         if self.use_morphological_paradigms:
             self._initialize_morphological_paradigms()
 
-        print("\n[ready] Ready!")
+        # 3️⃣ Auto-generate morphological variants dynamically
+        print("\n[+] Generating temporary noun paradigms dynamically ...")
+        generated_noun_forms = 0
+        noun_suffix_rules = ["+na#", "+alli#", "+ige#", "+inda#", "+vu#"]
+
+        for root in list(self.all_words):
+            # Process only WX transliterated (Latin) words
+            if len(root) < 3 or not re.match(r"^[a-zA-Z]+$", root):
+                continue
+
+            for rule in noun_suffix_rules:
+                new_form = self._apply_paradigm_rule(root, root, rule)
+                if new_form not in self.all_words:
+                    self.all_words.add(new_form)
+                    self.paradigm_words.add(new_form)
+                    generated_noun_forms += 1
+
+        print(f"  [auto-paradigms] Added {generated_noun_forms:,} noun forms to dictionary.")
+
+        print("\n[+] Generating temporary verb paradigms dynamically ...")
+        generated_verb_forms = 0
+        verb_suffix_rules = ["u_i#", "u_i_tAne#", "u_i_daru#", "u_i_vu#", "+uva#"]
+
+        for root in list(self.all_words):
+            if len(root) < 3 or not re.match(r"^[a-zA-Z]+$", root):
+                continue
+
+            for rule in verb_suffix_rules:
+                new_form = self._apply_paradigm_rule(root, root, rule)
+                if new_form not in self.all_words:
+                    self.all_words.add(new_form)
+                    self.paradigm_words.add(new_form)
+                    generated_verb_forms += 1
+
+        print(f"  [auto-paradigms] Added {generated_verb_forms:,} verb forms to dictionary.")
+
+        # 4️⃣ Auto-generate full paradigms from paradigm files
+        self.auto_generate_full_paradigms()
+
+        print(f"\n[ready] Total words (with paradigms): {len(self.all_words):,}")
+        print("[✅] Ready for spell checking and morphological lookup!")
 
     def _reset_paradigm_structures(self) -> None:
         """Reset paradigm-related caches"""
@@ -298,11 +337,62 @@ class SimplifiedSpellChecker:
     def _scan_paradigm_files(self) -> Dict[str, int]:
         """Read paradigm files into memory and categorize by word class"""
         summary_sets: Dict[str, set[str]] = defaultdict(set)
-        paradigm_dir = os.path.join("paradigms", "all")
-        if not os.path.exists(paradigm_dir):
-            return {}
+        category_dirs = {
+            "verb": os.path.join("paradigms", "Verb"),
+            "noun": os.path.join("paradigms", "Noun"),
+            "pronoun": os.path.join("paradigms", "Pronouns"),
+        }
 
-        for file_path in glob(os.path.join(paradigm_dir, "*.txt")):
+        # Fallback directory for legacy structure
+        legacy_dir = os.path.join("paradigms", "all")
+
+        def _iter_files(directory: str) -> List[str]:
+            if not os.path.isdir(directory):
+                return []
+            # Support nested folders per paradigm
+            pattern = os.path.join(directory, "**", "*.txt")
+            return glob(pattern, recursive=True)
+
+        # Load category-specific paradigms first
+        for category, dir_path in category_dirs.items():
+            for file_path in _iter_files(dir_path):
+                file_name = os.path.basename(file_path)
+                with open(file_path, "r", encoding="utf-8") as handle:
+                    for raw_line in handle:
+                        line = raw_line.strip()
+                        if not line:
+                            continue
+
+                        parts = line.split(maxsplit=1)
+                        surface = parts[0]
+                        rule = parts[1] if len(parts) > 1 else ""
+
+                        root, tag = self._extract_root_and_tag(rule, file_name)
+                        resolved_category = category
+
+                        record = {
+                            "surface": surface,
+                            "rule": rule,
+                            "source_file": file_name,
+                            "tag": tag,
+                            "category": resolved_category,
+                        }
+
+                        self.all_words.add(surface)
+                        self.paradigm_words.add(surface)
+                        self._paradigm_cache.setdefault(root, []).append(record)
+                        self.category_paradigms[resolved_category][root].append(record)
+                        self.root_categories.setdefault(root, resolved_category)
+
+                        if surface.startswith(root):
+                            suffix = surface[len(root) :]
+                            if suffix:
+                                self.category_suffixes[resolved_category][root].add(suffix)
+
+                        summary_sets[resolved_category].add(root)
+
+        # Legacy fallback to ensure older datasets still load
+        for file_path in _iter_files(legacy_dir):
             file_name = os.path.basename(file_path)
             with open(file_path, "r", encoding="utf-8") as handle:
                 for raw_line in handle:
@@ -497,34 +587,49 @@ class SimplifiedSpellChecker:
         print(f"Processing: {text[:50]}...")
         print(f"{'=' * 70}")
 
-        was_kannada = is_kannada_text(text)
-        if was_kannada:
-            print("\n[step 0] Converting Kannada to WX ...")
-            text = kannada_to_wx(text)
-            print(f"  wx: {text}")
-
-        print("\n[step 1] Tokenizing ...")
+        print("\n[step 0] Tokenizing original text ...")
         tokens = self.tokenize(text)
         print(f"  tokens: {tokens}")
+
+        print("\n[step 1] Normalizing tokens to WX ...")
+        token_infos: List[tuple[str, str, bool]] = []
+        normalized_tokens: List[str] = []
+        for token in tokens:
+            token_is_kannada = is_kannada_text(token)
+            normalized = kannada_to_wx(token) if token_is_kannada else token
+            token_infos.append((token, normalized, token_is_kannada))
+            normalized_tokens.append(normalized)
+        print(f"  normalized: {normalized_tokens}")
 
         print("\n[step 2] Checking ...")
         errors: List[Dict[str, List[str]]] = []
 
-        for word in tokens:
-            if len(word) <= 1:
+        for original, normalized, token_is_kannada in token_infos:
+            if len(normalized) <= 1:
                 continue
 
-            if word in self.all_words:
-                print(f"  [ok] {word}: in dictionary")
+            if normalized in self.all_words:
+                if original != normalized:
+                    print(f"  [ok] {original} ({normalized}): in dictionary")
+                else:
+                    print(f"  [ok] {original}: in dictionary")
                 continue
 
-            suggestions = self.get_suggestions(word)
-            if was_kannada:
-                suggestions = [wx_to_kannada(item) for item in suggestions]
+            suggestions = self.get_suggestions(normalized)
+            display_suggestions = (
+                [wx_to_kannada(item) for item in suggestions] if token_is_kannada else suggestions
+            )
 
-            display = ", ".join(suggestions[:5]) if suggestions else "No suggestions"
-            print(f"  [miss] {word}: {display}")
-            errors.append({"word": word, "suggestions": suggestions})
+            deduped: List[str] = []
+            seen: set[str] = set()
+            for suggestion in display_suggestions:
+                if suggestion not in seen:
+                    deduped.append(suggestion)
+                    seen.add(suggestion)
+
+            display = ", ".join(deduped[:5]) if deduped else "No suggestions"
+            print(f"  [miss] {original}: {display}")
+            errors.append({"word": original, "suggestions": deduped})
 
         return errors
 
@@ -610,59 +715,149 @@ class SimplifiedSpellChecker:
             return self._paradigm_cache[base_root]
 
         records: List[Dict[str, str]] = []
-        pattern = os.path.join("paradigms", "all", f"{base_root}*.txt")
-        for file_path in glob(pattern):
-            with open(file_path, "r", encoding="utf-8") as handle:
-                for line in handle:
-                    parts = line.strip().split(maxsplit=1)
-                    if not parts:
-                        continue
-                    surface = parts[0]
-                    rule = parts[1] if len(parts) > 1 else ""
-                    records.append({
-                        "surface": surface,
-                        "rule": rule,
-                        "source_file": os.path.basename(file_path),
-                    })
+        search_dirs = [
+            os.path.join("paradigms", "Verb"),
+            os.path.join("paradigms", "Noun"),
+            os.path.join("paradigms", "Pronouns"),
+            os.path.join("paradigms", "all"),  # Legacy fallback
+        ]
+
+        for directory in search_dirs:
+            if not os.path.isdir(directory):
+                continue
+            pattern = os.path.join(directory, "**", f"{base_root}*.txt")
+            for file_path in glob(pattern, recursive=True):
+                with open(file_path, "r", encoding="utf-8") as handle:
+                    for line in handle:
+                        parts = line.strip().split(maxsplit=1)
+                        if not parts:
+                            continue
+                        surface = parts[0]
+                        rule = parts[1] if len(parts) > 1 else ""
+                        records.append({
+                            "surface": surface,
+                            "rule": rule,
+                            "source_file": os.path.basename(file_path),
+                        })
 
         self._paradigm_cache[base_root] = records
         return records
 
-    @staticmethod
-    def _apply_paradigm_rule(base_root: str, variant_root: str, rule: str) -> str:
-        """Apply a paradigm rule to transform base_root forms into variant_root forms"""
+    def auto_generate_full_paradigms(self) -> None:
+        """
+        Automatically generate full paradigm variants for all base words
+        using paradigm rules and store them in memory for fast lookup.
+        Works for verbs, nouns, and pronouns.
+        """
+        print("\n[+] Auto-generating full morphological paradigms ...")
+        total_generated = 0
+
+        processed_roots: set[str] = set()
+
+        # Process known categories first for precise metadata
+        for category in ("verb", "noun", "pronoun"):
+            for base_root, records in self.category_paradigms[category].items():
+                processed_roots.add(base_root)
+                for record in records:
+                    rule = record.get("rule", "")
+                    surface = self._apply_paradigm_rule(base_root, base_root, rule)
+                    if not surface or surface in self.all_words:
+                        continue
+
+                    self.all_words.add(surface)
+                    self.paradigm_words.add(surface)
+                    total_generated += 1
+
+                    metadata = {
+                        "base_root": base_root,
+                        "rule": rule,
+                        "category": category,
+                        "source_file": record.get("source_file", ""),
+                    }
+                    self.word_to_paradigms[surface].append(metadata)
+
+        # Handle any remaining paradigms (legacy or uncategorized)
+        for base_root, records in self._paradigm_cache.items():
+            if base_root in processed_roots:
+                continue
+            category = self.root_categories.get(base_root, "other")
+            for record in records:
+                rule = record.get("rule", "")
+                surface = self._apply_paradigm_rule(base_root, base_root, rule)
+                if not surface or surface in self.all_words:
+                    continue
+
+                self.all_words.add(surface)
+                self.paradigm_words.add(surface)
+                total_generated += 1
+
+                metadata = {
+                    "base_root": base_root,
+                    "rule": rule,
+                    "category": category,
+                    "source_file": record.get("source_file", ""),
+                }
+                self.word_to_paradigms[surface].append(metadata)
+
+        print(f"  [morph-paradigm] Generated {total_generated:,} forms")
+        print("  [ok] Morphological paradigms ready")
+
+    def expand_all_paradigms(self, root: str) -> set[str]:
+        """Generate all possible paradigm variants for a given root."""
+        all_forms: set[str] = set()
+        for category in ("verb", "noun", "pronoun"):
+            for record in self.category_paradigms.get(category, {}).get(root, []):
+                surface = self._apply_paradigm_rule(root, root, record.get("rule", ""))
+                if surface:
+                    all_forms.add(surface)
+
+        # Include uncategorized/legacy paradigms if available
+        for record in self._paradigm_cache.get(root, []):
+            surface = self._apply_paradigm_rule(root, root, record.get("rule", ""))
+            if surface:
+                all_forms.add(surface)
+
+        return all_forms
+
+    def _apply_paradigm_rule(self, base_root: str, variant_root: str, rule: str) -> str:
+        """
+        Apply a full morphological paradigm rule recursively (Flask-compatible).
+        Handles + and _ segment chains and multiple morphological layers.
+        """
+
         if not rule:
             return variant_root
 
-        word = variant_root
-        for segment in rule.split("+"):
-            if "_" not in segment:
+        word = variant_root.strip()
+        rule = rule.strip()
+
+        segments = [seg.strip() for seg in rule.split("+") if seg.strip()]
+
+        for seg in segments:
+            parts = seg.split("_")
+            cleaned = [p.replace("#", "") for p in parts if p]
+
+            if not cleaned:
                 continue
 
-            left, right = segment.split("_", 1)
-
-            if "#" in right:
-                word = word + left
+            if len(cleaned) == 1:
+                word += cleaned[0]
                 continue
 
-            if "_" in right:
-                base_piece, feat = right.split("_", 1)
-            else:
-                base_piece, feat = right, ""
+            left, *rest = cleaned
 
-            if base_piece and word.endswith(base_piece):
-                word = word[: -len(base_piece)] + left
-            else:
-                word = word + left
+            # Determine the segment that should be replaced if present
+            replace_target = rest[-1] if rest else ""
 
-            if feat:
-                parts = feat.split("_")
-                if len(parts) >= 2:
-                    add_piece, old_piece = parts[0], parts[1]
-                    if old_piece and word.endswith(old_piece):
-                        word = word[: -len(old_piece)] + add_piece
-                    else:
-                        word = word + add_piece
+            if replace_target and word.endswith(replace_target):
+                word = word[: -len(replace_target)] + left
+            else:
+                word += left
+
+            # Append intermediate morphemes (excluding the final replace target)
+            for extra in rest[:-1]:
+                if extra:
+                    word += extra
 
         return word
 
