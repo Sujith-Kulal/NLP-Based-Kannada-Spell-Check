@@ -237,7 +237,15 @@ class SuggestionPopup:
 class UnderlineMarker:
     """Overlay window that draws an underline below a target word."""
 
-    def __init__(self, master: tk.Tk, *, char_px: int = 12, min_width: int = 10, duration_ms: int = 2200) -> None:
+    def __init__(
+        self,
+        master: tk.Tk,
+        *,
+        char_px: int = 12,
+        min_width: int = 10,
+        duration_ms: Optional[int] = 2200,
+        line_color: str = "#FF3B30"
+    ) -> None:
         self.master = master
         self.char_px = max(8, char_px)
         self.min_width = max(8, min_width)
@@ -245,6 +253,7 @@ class UnderlineMarker:
         self._hide_job: Optional[str] = None
         self.visible = False
         self._bg_color = "#00FF00"
+        self._line_color = line_color
 
         self.window = tk.Toplevel(master)
         self.window.overrideredirect(True)
@@ -261,14 +270,30 @@ class UnderlineMarker:
         self.canvas = tk.Canvas(self.window, height=4, width=self.min_width, bg=self._bg_color, highlightthickness=0, bd=0)
         self.canvas.pack(fill="both", expand=True)
 
-    def show(self, caret_x: int, caret_y: int, word_length: int, delimiter_extra: int = 0) -> None:
+    def show(
+        self,
+        caret_x: int,
+        caret_y: int,
+        word_length: int,
+        delimiter_extra: int = 0,
+        *,
+        line_color: Optional[str] = None,
+        duration_ms: Optional[int] = None,
+        absolute_start_x: Optional[int] = None,
+        pixel_width: Optional[int] = None,
+    ) -> None:
         if word_length <= 0:
             return
 
         total_chars = max(1, word_length + max(0, delimiter_extra))
-        width = max(self.min_width, total_chars * self.char_px)
-        start_x = max(0, caret_x - width)
+        if pixel_width is not None:
+            width = max(self.min_width, int(pixel_width))
+        else:
+            width = max(self.min_width, total_chars * self.char_px)
+        start_x = max(0, int(absolute_start_x) if absolute_start_x is not None else int(caret_x - width))
         underline_y = 2
+        color = line_color or self._line_color
+        effective_duration = self.duration_ms if duration_ms is None else duration_ms
 
         self.canvas.config(width=width + 4, height=4)
         self.canvas.delete("underline")
@@ -277,7 +302,7 @@ class UnderlineMarker:
             underline_y,
             width + 2,
             underline_y,
-            fill="#FF3B30",
+            fill=color,
             width=2,
             capstyle=tk.ROUND,
             tags="underline",
@@ -297,7 +322,10 @@ class UnderlineMarker:
                 self.window.after_cancel(self._hide_job)
             except tk.TclError:
                 pass
-        self._hide_job = self.window.after(self.duration_ms, self.hide)
+        if effective_duration is not None:
+            self._hide_job = self.window.after(effective_duration, self.hide)
+        else:
+            self._hide_job = None
 
     def hide(self) -> None:
         if self._hide_job is not None:
@@ -339,7 +367,11 @@ class SmartKeyboardService:
             on_close_callback=self.on_popup_close
         )
         self.no_suggestion_marker = UnderlineMarker(self.popup.root)
+        self.paste_markers: List[UnderlineMarker] = []
+        self.caret_step_delay = 0.003
         self.marker_active_word: str = ""
+        self.marker_target_hwnd: Optional[int] = None
+        self.marker_lock = threading.Lock()
         
         self.current_word_chars = []  # Characters in the current word being typed/edited
         self.cursor_index = 0  # Position within the current word buffer
@@ -426,6 +458,102 @@ class SmartKeyboardService:
             pass
         self.marker_active_word = ""
 
+    def clear_paste_underlines(self):
+        """Remove all underline overlays created during paste processing."""
+
+        def _clear():
+            with self.marker_lock:
+                while self.paste_markers:
+                    marker = self.paste_markers.pop()
+                    try:
+                        marker.destroy()
+                    except Exception:
+                        pass
+                self.marker_target_hwnd = None
+
+        if threading.current_thread() is threading.main_thread():
+            _clear()
+        else:
+            try:
+                self.popup.root.after(0, _clear)
+            except Exception:
+                pass
+
+    def _move_caret(self, key, steps: int):
+        """Move caret left/right by a given number of steps."""
+        if steps <= 0:
+            return
+        for _ in range(steps):
+            try:
+                self.keyboard_controller.press(key)
+                self.keyboard_controller.release(key)
+            except Exception:
+                break
+            time.sleep(self.caret_step_delay)
+
+    def move_caret_left(self, steps: int):
+        self._move_caret(Key.left, steps)
+
+    def move_caret_right(self, steps: int):
+        self._move_caret(Key.right, steps)
+
+    def add_paste_marker(
+        self,
+        caret_x: int,
+        caret_y: int,
+        word_length: int,
+        *,
+        color: str,
+        absolute_start_x: Optional[int] = None,
+        pixel_width: Optional[int] = None,
+    ):
+        """Create a persistent underline marker for pasted text."""
+        marker = UnderlineMarker(
+            self.popup.root,
+            duration_ms=None,
+            line_color=color,
+        )
+        try:
+            marker.show(
+                caret_x,
+                caret_y,
+                word_length,
+                line_color=color,
+                duration_ms=None,
+                absolute_start_x=absolute_start_x,
+                pixel_width=pixel_width,
+            )
+            self.paste_markers.append(marker)
+        except Exception:
+            marker.destroy()
+
+    def start_marker_visibility_watch(self, hwnd: Optional[int]):
+        if not hwnd:
+            return
+
+        def watcher(target_hwnd: int):
+            while True:
+                with self.marker_lock:
+                    has_markers = bool(self.paste_markers) and self.marker_target_hwnd == target_hwnd
+                if not has_markers:
+                    break
+                try:
+                    if not win32gui.IsWindow(target_hwnd):
+                        self.clear_paste_underlines()
+                        break
+                    if win32gui.IsIconic(target_hwnd):
+                        self.clear_paste_underlines()
+                        break
+                    if win32gui.GetForegroundWindow() != target_hwnd:
+                        self.clear_paste_underlines()
+                        break
+                except Exception:
+                    self.clear_paste_underlines()
+                    break
+                time.sleep(0.4)
+
+        threading.Thread(target=watcher, args=(hwnd,), daemon=True).start()
+
     def show_no_suggestion_marker(self, word: str):
         """Underline the last word in the active editor when no suggestions are available."""
         if not word or not self.enabled:
@@ -460,6 +588,105 @@ class SmartKeyboardService:
         # Split by delimiters while preserving Kannada words
         words = re.findall(r'[^\s\n\r\t.,!?;:]+', text)
         return [w for w in words if any(self.is_kannada_char(c) for c in w)]
+
+    def process_pasted_text_for_underlines(self, full_text: str):
+        """Iterate through pasted text and underline every non-correct Kannada word."""
+        if not full_text:
+            return
+
+        spans = list(re.finditer(r'[^\s\n\r\t.,!?;:]+', full_text))
+        if not spans:
+            return
+
+        def worker():
+            try:
+                self.replacing = True
+                self.popup.hide()
+                self.clear_paste_underlines()
+
+                total_chars = len(full_text)
+                # Move caret back to the start of the pasted content
+                self.move_caret_left(total_chars)
+                time.sleep(0.06)
+
+                target_hwnd = windll.user32.GetForegroundWindow()
+                with self.marker_lock:
+                    self.marker_target_hwnd = target_hwnd
+                monitor_started = False
+
+                for idx, match in enumerate(spans):
+                    word = match.group(0)
+                    word_len = len(word)
+
+                    # Advance caret to the end of the current word
+                    self.move_caret_right(word_len)
+                    time.sleep(0.02)
+
+                    if any(self.is_kannada_char(c) for c in word) and word_len >= 2:
+                        suggestions, had_error = self.get_suggestions(word)
+                        if had_error:
+                            marker_color = "#FF3B30" if suggestions else "#FFA500"
+                            start_x = None
+                            start_y = None
+
+                            # Walk caret back to measure start boundary
+                            self.move_caret_left(word_len)
+                            time.sleep(0.02)
+                            try:
+                                start_x, start_y = get_caret_position()
+                            except Exception:
+                                start_x = None
+                                start_y = None
+
+                            # Return caret to end of the word
+                            self.move_caret_right(word_len)
+                            time.sleep(0.02)
+                            try:
+                                end_x, end_y = get_caret_position()
+                            except Exception:
+                                end_x, end_y = (0, 0)
+
+                            pixel_width = None
+                            absolute_start = None
+                            caret_y = end_y
+
+                            if (
+                                start_x is not None
+                                and start_y is not None
+                                and abs(end_y - start_y) < 30
+                            ):
+                                width_px = end_x - start_x
+                                if width_px >= 4:
+                                    pixel_width = width_px
+                                    absolute_start = start_x
+
+                            self.add_paste_marker(
+                                end_x,
+                                caret_y,
+                                word_len,
+                                color=marker_color,
+                                absolute_start_x=absolute_start,
+                                pixel_width=pixel_width,
+                            )
+                            if not monitor_started:
+                                monitor_started = True
+                                self.start_marker_visibility_watch(target_hwnd)
+
+                    # Skip delimiters between this word and the next
+                    next_start = spans[idx + 1].start() if idx + 1 < len(spans) else len(full_text)
+                    delimiter_count = max(0, next_start - match.end())
+                    if delimiter_count:
+                        self.move_caret_right(delimiter_count)
+                        time.sleep(0.015)
+
+            except Exception as exc:
+                print(f"❌ Error processing pasted words for underlines: {exc}")
+                import traceback
+                traceback.print_exc()
+            finally:
+                self.replacing = False
+
+        threading.Thread(target=worker, daemon=True).start()
     
     def check_pasted_text(self):
         """Check if text was pasted and show suggestions for last word"""
@@ -479,6 +706,7 @@ class SmartKeyboardService:
             print(f"🔍 Extracted Kannada words: {words}")
             
             if words and self.enabled and not self.replacing:
+                self.process_pasted_text_for_underlines(clipboard_text)
                 # Check the last word pasted
                 last_pasted_word = words[-1]
                 self.last_word = last_pasted_word
@@ -887,10 +1115,12 @@ class SmartKeyboardService:
         if not self.enabled:
             self.popup.hide()
             self.hide_no_suggestion_marker()
+            self.clear_paste_underlines()
     
     def on_popup_close(self):
         """Handle popup window close"""
         self.running = False
+        self.clear_paste_underlines()
         print("\n🛑 Exiting service...")
     
     def run(self):
