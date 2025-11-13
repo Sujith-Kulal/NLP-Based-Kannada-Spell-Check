@@ -1,0 +1,282 @@
+ninnannu nInu(PN11)+ninnannu_nInu_ACC 
+
+ninniMxa nInu(PN11)+ninniMxa_nInu_INS
+
+ninageV nInu(PN11)+ninageV_nInu_DAT
+
+ninniMxa nInu(PN11)+ninniMxa_nInu_ABL
+
+ninna nInu(PN11)+ninna_nInu_GEN
+
+ninnalli nInu(PN11)+ninnalli_nInu_LOC
+
+ninagoskara nInu(PN11)+ninagoskara_nInu_BEN
+
+ninagoskara nInu(PN11)+ninagoskara_nInu_PUR
+
+ninagAgi nInu(PN11)+ninagAgi_nInu_BEN
+
+ninagAgi nInu(PN11)+ninagAgi_nInu_PUR
+
+ninagosuga nInu(PN11)+ninagosuga_nInu_BEN
+
+ninagosuga nInu(PN11)+ninagosuga_nInu_PUR
+
+ninagiMwa nInu(PN11)+ninagiMwa_nInu_COMP
+
+ninnaMweV nInu(PN11)+ninnaMweV_nInu_SIM
+
+ninnaMwa nInu(PN11)+ninnaMwa_nInu_SIM
+
+ninnaMwaha nInu(PN11)+ninnaMwaha_nInu_SIM
+
+ninnoVdaneV nInu(PN11)+ninnoVdaneV_nInu_SOC
+
+ninnoVMxigeV nInu(PN11)+ninnoVMxigeV_nInu_SOC
+
+nInA nInu(PN11)+nu_nu_NOM+nA_nu_INTR
+
+nInU nInu(PN11)+nu_nu_NOM+nU_nu_INC
+
+nIno nInu(PN11)+nu_nu_NOM+no_nu_DUB
+
+nIno nInu(PN11)+nu_nu_NOM+no_nu_INDF
+
+nIno nInu(PN11)+nu_nu_NOM+no_nu_PRES
+
+nIne nInu(PN11)+nu_nu_NOM+ne_nu_IMPH
+
+nIne nInu(PN11)+nu_nu_NOM+ne_nu_DEC
+
+nIne nInu(PN11)+nu_nu_NOM+ne_nu_RIS
+
+ninnannA nInu(PN11)+ninna_nInu_ACC+nnA_#_INTR
+
+ninnannU nInu(PN11)+ninna_nInu_ACC+nnU_#_INC
+
+ninnanno nInu(PN11)+ninna_nInu_ACC+nno_#_DUB
+
+ninnanno nInu(PN11)+ninna_nInu_ACC+nno_#_INDF
+
+ninnanno nInu(PN11)+ninna_nInu_ACC+nno_#_PRES
+
+ninnanne nInu(PN11)+ninna_nInu_ACC+nne_#_IMPH
+
+ninnanne nInu(PN11)+ninna_nInu_ACC+nne_#_DEC
+
+ninnanne nInu(PN11)+ninna_nInu_ACC+nne_#_RIS
+
+ninniMxalA nInu(PN11)+ninniMxa_nInu_INS+lA_#_INTR
+
+ninniMxalU nInu(PN11)+ninniMxa_nInu_INS+lU_#_INC
+
+ninniMxalo nInu(PN11)+ninniMxa_nInu_INS+lo_#_DUB
+
+ninniMxalo nInu(PN11)+ninniMxa_nInu_INS+lo_#_INDF
+
+ninniMxalo nInu(PN11)+ninniMxa_nInu_INS+lo_#_PRES
+
+ninniMxale nInu(PN11)+ninniMxa_nInu_INS+le_#_IMP
+
+ninniMxale nInu(PN11)+ninniMxa_nInu_INS+le_#_DEC
+
+ninniMxale nInu(PN11)+ninniMxa_nInu_INS+le_#_RIS
+
+ninagA nInu(PN11)+nina_nInu_DAT+gA_#_INTR
+
+ninagU nInu(PN11)+nina_nInu_DAT+gU_#_INC
+
+ninago nInu(PN11)+nina_nInu_DAT+go_#_DUB
+
+ninago nInu(PN11)+nina_nInu_DAT+go_#_INDF
+
+ninago nInu(PN11)+nina_nInu_DAT+go_#_PRES
+
+ninage nInu(PN11)+nina_nInu_DAT+ge_#_IMPH
+
+ninage nInu(PN11)+nina_nInu_DAT+ge_#_DEC
+
+ninage nInu(PN11)+nina_nInu_DAT+ge_#_RIS
+
+ninniMxalA nInu(PN11)+ninniMxa_nInu_ABL+lA_#_INTR
+
+ninniMxalU nInu(PN11)+ninniMxa_nInu_ABL+lU_#_INC
+
+ninniMxalo nInu(PN11)+ninniMxa_nInu_ABL+lo_#_DUB
+
+ninniMxalo nInu(PN11)+ninniMxa_nInu_ABL+lo_#_INDF
+
+ninniMxalo nInu(PN11)+ninniMxa_nInu_ABL+lo_#_PRES
+
+ninniMxale nInu(PN11)+ninniMxa_nInu_ABL+le_#_IMP
+
+ninniMxale nInu(PN11)+ninniMxa_nInu_ABL+le_#_DEC
+
+ninniMxale nInu(PN11)+ninniMxa_nInu_ABL+le_#_RIS
+
+ninnalliyA nInu(PN11)+ninnalli_nInu_LOC+yA_#_INTR
+
+ninnalliyU nInu(PN11)+ninnalli_nInu_LOC+yU_#_INC
+
+ninnalliyo nInu(PN11)+ninnalli_nInu_LOC+yo_#_DUB
+
+ninnalliyo nInu(PN11)+ninnalli_nInu_LOC+yo_#_INDF
+
+ninnalliyo nInu(PN11)+ninnalli_nInu_LOC+yo_#_PRES
+
+ninnalliye nInu(PN11)+ninnalli_nInu_LOC+ye_#_IMPH
+
+ninnalliye nInu(PN11)+ninnalli_nInu_LOC+ye_#_DEC
+
+ninnalliye nInu(PN11)+ninnalli_nInu_LOC+ye_#_RIS
+
+ninagoskaravA nInu(PN11)+ninagoskara_nInu_BEN+vA_#_INTR
+
+ninagoskaravU nInu(PN11)+ninagoskara_nInu_BEN+vU_#_INC
+
+ninagoskaravo nInu(PN11)+ninagoskara_nInu_BEN+vo_#_DUB
+
+ninagoskaravo nInu(PN11)+ninagoskara_nInu_BEN+vo_#_PRES
+
+ninagoskarave nInu(PN11)+ninagoskara_nInu_BEN+ve_#_IMPH
+
+ninagoskarave nInu(PN11)+ninagoskara_nInu_BEN+ve_#_DEC
+
+ninagoskarave nInu(PN11)+ninagoskara_nInu_BEN+ve_#_RIS
+
+ninagoskaravA nInu(PN11)+ninagoskara_nInu_PUR+vA_#_INTR
+
+ninagoskaravU nInu(PN11)+ninagoskara_nInu_PUR+vU_#_INC
+
+ninagoskaravo nInu(PN11)+ninagoskara_nInu_PUR+vo_#_DUB
+
+ninagoskaravo nInu(PN11)+ninagoskara_nInu_PUR+vo_#_PRES
+
+ninagoskarave nInu(PN11)+ninagoskara_nInu_PUR+ve_#_IMPH
+
+ninagoskarave nInu(PN11)+ninagoskara_nInu_PUR+ve_#_DEC
+
+ninagoskarave nInu(PN11)+ninagoskara_nInu_PUR+ve_#_RIS
+
+ninagAgiyA nInu(PN11)+ninagAgi_nInu_BEN+yA_#_INTR
+
+ninagAgiyU nInu(PN11)+ninagAgi_nInu_BEN+yU_#_INC
+ninagAgiyo nInu(PN11)+ninagAgi_nInu_BEN+yo_#_DUB
+
+ninagAgiyo nInu(PN11)+ninagAgi_nInu_BEN+yo_#_PRES
+
+ninagAgiye nInu(PN11)+ninagAgi_nInu_BEN+ye_#_IMPH
+
+ninagAgiye nInu(PN11)+ninagAgi_nInu_BEN+ye_#_DEC
+
+ninagAgiye nInu(PN11)+ninagAgi_nInu_BEN+ye_#_RIS
+
+ninagAgiyA nInu(PN11)+ninagAgi_nInu_PUR+yA_#_INTR
+
+ninagAgiyU nInu(PN11)+ninagAgi_nInu_PUR+yU_#_INC
+
+ninagAgiyo nInu(PN11)+ninagAgi_nInu_PUR+yo_#_DUB
+
+ninagAgiyo nInu(PN11)+ninagAgi_nInu_PUR+yo_#_PRES
+
+ninagAgiye nInu(PN11)+ninagAgi_nInu_PUR+ye_#_IMPH
+
+ninagAgiye nInu(PN11)+ninagAgi_nInu_PUR+ye_#_DEC
+
+ninagAgiye nInu(PN11)+ninagAgi_nInu_PUR+ye_#_RIS
+
+ninagosugavA nInu(PN11)+ninagosuga_nInu_BEN+vA_#_INTR
+
+ninagosugavU nInu(PN11)+ninagosuga_nInu_BEN+vU_#_INC
+
+ninagosugavo nInu(PN11)+ninagosuga_nInu_BEN+vo_#_DUB
+
+ninagosugavo nInu(PN11)+ninagosuga_nInu_BEN+vo_#_INDF
+
+ninagosugavo nInu(PN11)+ninagosuga_nInu_BEN+vo_#_PRES
+
+ninagosugave nInu(PN11)+ninagosuga_nInu_BEN+ve_#_IMPH
+
+ninagosugave nInu(PN11)+ninagosuga_nInu_BEN+ve_#_DEC
+
+ninagosugave nInu(PN11)+ninagosuga_nInu_BEN+ve_#_RIS
+
+ninagosugavA nInu(PN11)+ninagosuga_nInu_PUR+vA_#_INTR
+
+ninagosugavU nInu(PN11)+ninagosuga_nInu_PUR+vU_#_INC
+
+ninagosugavo nInu(PN11)+ninagosuga_nInu_PUR+vo_#_DUB
+
+ninagosugavo nInu(PN11)+ninagosuga_nInu_PUR+vo_#_INDF
+
+ninagosugavo nInu(PN11)+ninagosuga_nInu_PUR+vo_#_PRES
+
+ninagosugave nInu(PN11)+ninagosuga_nInu_PUR+ve_#_IMPH
+
+ninagosugave nInu(PN11)+ninagosuga_nInu_PUR+ve_#_DEC
+
+ninagosugave nInu(PN11)+ninagosuga_nInu_PUR+ve_#_RIS
+
+ninagiMwalA nInu(PN11)+ninagiMwa_nInu_COMP+lA_#_INTR
+
+ninagiMwalU nInu(PN11)+ninagiMwa_nInu_COMP+lU_#_INC
+
+ninagiMwalo nInu(PN11)+ninagiMwa_nInu_COMP+lo_#_DUB
+
+ninagiMwalo nInu(PN11)+ninagiMwa_nInu_COMP+lo_#_INDF
+
+ninagiMwalo nInu(PN11)+ninagiMwa_nInu_COMP+lo_#_PRES
+
+ninagiMwale nInu(PN11)+ninagiMwa_nInu_COMP+le_#_IMPH
+
+ninagiMwale nInu(PN11)+ninagiMwa_nInu_COMP+le_#_DEC
+
+ninagiMwale nInu(PN11)+ninagiMwa_nInu_COMP+le_#_RIS
+
+ninnaMweVyA nInu(PN11)+ninnaMweV_nInu_SIM+yA_#_INTR
+
+ninnaMweVyU nInu(PN11)+ninnaMweV_nInu_SIM+yU_#_INC
+
+ninnaMweVyo nInu(PN11)+ninnaMweV_nInu_SIM+yo_#_DUB
+
+ninnaMweVyo nInu(PN11)+ninnaMweV_nInu_SIM+yo_#_INDF
+
+ninnaMweVyo nInu(PN11)+ninnaMweV_nInu_SIM+yo_#_PRES
+
+ninnaMweVye nInu(PN11)+ninnaMweV_nInu_SIM+ye_#_IMPH
+
+ninnaMweVye nInu(PN11)+ninnaMweV_nInu_SIM+ye_#_DEC
+ninnaMweVye nInu(PN11)+ninnaMweV_nInu_SIM+ye_#_RIS
+
+ninnoVdaneVyA nInu(PN11)+ninnoVdaneV_nInu_SOC+yA_#_INTR
+
+ninnoVdaneVyU nInu(PN11)+ninnoVdaneV_nInu_SOC+yU_#_INC
+
+ninnoVdaneVyo nInu(PN11)+ninnoVdaneV_nInu_SOC+yo_#_DUB
+
+ninnoVdaneVyo nInu(PN11)+ninnoVdaneV_nInu_SOC+yo_#_INDF
+
+ninnoVdaneVyo nInu(PN11)+ninnoVdaneV_nInu_SOC+yo_#_PRES
+
+ninnoVdaneVye nInu(PN11)+ninnoVdaneV_nInu_SOC+ye_#_IMPH
+
+ninnoVdaneVye nInu(PN11)+ninnoVdaneV_nInu_SOC+ye_#_DEC
+
+ninnoVdaneVye nInu(PN11)+ninnoVdaneV_nInu_SOC+ye_#_RIS
+
+ninnoVMxigeVyA nInu(PN11)+ninnoVMxigeV_nInu_SOC+yA_#_INTR
+
+ninnoVMxigeVyU nInu(PN11)+ninnoVMxigeV_nInu_SOC+yU_#_INC
+
+ninnoVMxigeVyo nInu(PN11)+ninnoVMxigeV_nInu_SOC+yo_#_DUB
+
+ninnoVMxigeVyo nInu(PN11)+ninnoVMxigeV_nInu_SOC+yo_#_INDF
+
+ninnoVMxigeVyo nInu(PN11)+ninnoVMxigeV_nInu_SOC+yo_#_PRES
+
+ninnoVMxigeVye nInu(PN11)+ninnoVMxigeV_nInu_SOC+ye_#_IMPH
+
+ninnoVMxigeVye nInu(PN11)+ninnoVMxigeV_nInu_SOC+ye_#_DEC
+
+ninnoVMxigeVye nInu(PN11)+ninnoVMxigeV_nInu_SOC+ye_#_RIS
+

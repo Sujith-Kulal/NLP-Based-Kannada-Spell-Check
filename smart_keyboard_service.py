@@ -35,6 +35,7 @@ import win32clipboard
 import re
 import win32gui
 import win32con
+from typing import List, Optional, Tuple
 
 # Add project paths
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -233,6 +234,94 @@ class SuggestionPopup:
             self.on_close_callback()
 
 
+class UnderlineMarker:
+    """Overlay window that draws an underline below a target word."""
+
+    def __init__(self, master: tk.Tk, *, char_px: int = 12, min_width: int = 10, duration_ms: int = 2200) -> None:
+        self.master = master
+        self.char_px = max(8, char_px)
+        self.min_width = max(8, min_width)
+        self.duration_ms = duration_ms
+        self._hide_job: Optional[str] = None
+        self.visible = False
+        self._bg_color = "#00FF00"
+
+        self.window = tk.Toplevel(master)
+        self.window.overrideredirect(True)
+        self.window.attributes("-topmost", True)
+        try:
+            self.window.wm_attributes("-transparentcolor", self._bg_color)
+        except tk.TclError:
+            try:
+                self.window.attributes("-alpha", 0.85)
+            except tk.TclError:
+                pass
+        self.window.withdraw()
+
+        self.canvas = tk.Canvas(self.window, height=4, width=self.min_width, bg=self._bg_color, highlightthickness=0, bd=0)
+        self.canvas.pack(fill="both", expand=True)
+
+    def show(self, caret_x: int, caret_y: int, word_length: int, delimiter_extra: int = 0) -> None:
+        if word_length <= 0:
+            return
+
+        total_chars = max(1, word_length + max(0, delimiter_extra))
+        width = max(self.min_width, total_chars * self.char_px)
+        start_x = max(0, caret_x - width)
+        underline_y = 2
+
+        self.canvas.config(width=width + 4, height=4)
+        self.canvas.delete("underline")
+        self.canvas.create_line(
+            2,
+            underline_y,
+            width + 2,
+            underline_y,
+            fill="#FF3B30",
+            width=2,
+            capstyle=tk.ROUND,
+            tags="underline",
+        )
+
+        try:
+            self.window.geometry(f"+{int(start_x)}+{int(caret_y + 4)}")
+        except tk.TclError:
+            return
+
+        self.window.deiconify()
+        self.window.lift()
+        self.visible = True
+
+        if self._hide_job is not None:
+            try:
+                self.window.after_cancel(self._hide_job)
+            except tk.TclError:
+                pass
+        self._hide_job = self.window.after(self.duration_ms, self.hide)
+
+    def hide(self) -> None:
+        if self._hide_job is not None:
+            try:
+                self.window.after_cancel(self._hide_job)
+            except tk.TclError:
+                pass
+            self._hide_job = None
+
+        if self.visible:
+            try:
+                self.window.withdraw()
+            except tk.TclError:
+                pass
+            self.visible = False
+
+    def destroy(self) -> None:
+        self.hide()
+        try:
+            self.window.destroy()
+        except tk.TclError:
+            pass
+
+
 # ---------------------------------------------------------------------------
 # Smart Keyboard Service
 # ---------------------------------------------------------------------------
@@ -249,6 +338,8 @@ class SmartKeyboardService:
             on_selection_callback=self.replace_word,
             on_close_callback=self.on_popup_close
         )
+        self.no_suggestion_marker = UnderlineMarker(self.popup.root)
+        self.marker_active_word: str = ""
         
         self.current_word_chars = []  # Characters in the current word being typed/edited
         self.cursor_index = 0  # Position within the current word buffer
@@ -282,7 +373,7 @@ class SmartKeyboardService:
         print("="*70 + "\n")
         print("💡 TIP: Press Esc twice quickly to stop the service cleanly")
     
-    def reset_current_word(self, preserve_delimiter=False):
+    def reset_current_word(self, preserve_delimiter=False, clear_marker=True):
         """Clear the tracked word buffer and reset caret index"""
         self.current_word_chars = []
         self.cursor_index = 0
@@ -290,6 +381,8 @@ class SmartKeyboardService:
         self.selection_range = None
         self.pending_restore = False
         self.restore_allowed = preserve_delimiter
+        if clear_marker:
+            self.hide_no_suggestion_marker()
         if not preserve_delimiter:
             self.trailing_delimiter_count = 0
             self.last_committed_word_chars = []
@@ -324,6 +417,27 @@ class SmartKeyboardService:
             self.keyboard_controller.release(Key.tab)
         else:
             self.keyboard_controller.type(delimiter)
+    
+    def hide_no_suggestion_marker(self):
+        """Hide underline overlay if it is showing."""
+        try:
+            self.no_suggestion_marker.hide()
+        except Exception:
+            pass
+        self.marker_active_word = ""
+
+    def show_no_suggestion_marker(self, word: str):
+        """Underline the last word in the active editor when no suggestions are available."""
+        if not word or not self.enabled:
+            return
+
+        caret_x, caret_y = get_caret_position()
+        delimiter_extra = 0
+        try:
+            self.no_suggestion_marker.show(caret_x, caret_y, len(word), delimiter_extra=delimiter_extra)
+            self.marker_active_word = word
+        except Exception as exc:
+            print(f"⚠️ Unable to underline word '{word}': {exc}")
     
     def get_clipboard_text(self):
         """Get text from clipboard safely"""
@@ -369,15 +483,22 @@ class SmartKeyboardService:
                 last_pasted_word = words[-1]
                 self.last_word = last_pasted_word
                 print(f"🔍 Checking last pasted word: '{last_pasted_word}'")
-                suggestions = self.get_suggestions(last_pasted_word)
+                suggestions, had_error = self.get_suggestions(last_pasted_word)
                 print(f"🔍 Suggestions found: {suggestions}")
                 
+                if had_error:
+                    self.show_no_suggestion_marker(last_pasted_word)
+                else:
+                    self.hide_no_suggestion_marker()
+
                 if suggestions:
                     print(f"✅ Showing suggestions for pasted word: '{last_pasted_word}'")
                     self.popup.show(suggestions)
                 else:
                     print(f"ℹ️ No suggestions for: '{last_pasted_word}'")
                     self.popup.hide()
+                    if not had_error:
+                        self.hide_no_suggestion_marker()
             else:
                 print(f"⚠️ No Kannada words found or service disabled")
         except Exception as e:
@@ -385,12 +506,12 @@ class SmartKeyboardService:
             import traceback
             traceback.print_exc()
     
-    def get_suggestions(self, word):
-        """Return suggestion list for a word"""
+    def get_suggestions(self, word) -> Tuple[List[str], bool]:
+        """Return suggestion list for a word along with an error flag"""
         if not word or len(word) < 2:
-            return []
+            return [], False
         if not any(self.is_kannada_char(c) for c in word):
-            return []
+            return [], False
         was_kannada = is_kannada_text(word)
         try:
             errors = self.spell_checker.check_text(word)
@@ -400,10 +521,10 @@ class SmartKeyboardService:
                 if was_kannada:
                     from kannada_wx_converter import wx_to_kannada
                     suggestions = [wx_to_kannada(s) for s in suggestions]
-                return suggestions[:5]
+                return suggestions[:5], True
         except Exception:
-            pass
-        return []
+            return [], False
+        return [], False
     
     def replace_word(self, chosen_word):
         """Replace the misspelled word with chosen suggestion"""
@@ -451,7 +572,8 @@ class SmartKeyboardService:
             
             self.replacing = False  # Reset flag after replacement complete
             print("✅ Replacement complete")
-            self.reset_current_word(preserve_delimiter=True)
+            self.hide_no_suggestion_marker()
+            self.reset_current_word(preserve_delimiter=True, clear_marker=False)
             
         except Exception as e:
             print(f"⚠️ Replacement failed: {e}")
@@ -695,20 +817,27 @@ class SmartKeyboardService:
                     if word == self.last_replaced_word and time_since_replacement < 0.5:
                         print(f"⏭️ Skipping check - just replaced this word")
                         self.popup.hide()
+                        self.hide_no_suggestion_marker()
                         self.last_replaced_word = ""  # Clear it
                     else:
                         self.last_word = word  # Store the word for replacement
                         self.words_checked += 1
-                        suggestions = self.get_suggestions(word)
-                        if suggestions:
-                            self.popup.show(suggestions)
+                        suggestions, had_error = self.get_suggestions(word)
+                        if had_error:
+                            self.show_no_suggestion_marker(word)
+                            if suggestions:
+                                self.popup.show(suggestions)
+                            else:
+                                self.popup.hide()
                         else:
                             self.popup.hide()
+                            self.hide_no_suggestion_marker()
                 else:
                     # ✅ Hide popup if no word was typed (multiple spaces, etc.)
                     self.popup.hide()
+                    self.hide_no_suggestion_marker()
                 # Always clear buffer after delimiter
-                self.reset_current_word(preserve_delimiter=True)
+                self.reset_current_word(preserve_delimiter=True, clear_marker=False)
             elif char:
                 self.pending_restore = False
                 self.restore_allowed = False
@@ -757,6 +886,7 @@ class SmartKeyboardService:
         print(f"\n🔄 Suggestion mode {status}")
         if not self.enabled:
             self.popup.hide()
+            self.hide_no_suggestion_marker()
     
     def on_popup_close(self):
         """Handle popup window close"""
@@ -800,6 +930,10 @@ class SmartKeyboardService:
                 self.popup.root.after(100, check_running)
             else:
                 listener.stop()
+                try:
+                    self.no_suggestion_marker.destroy()
+                except Exception:
+                    pass
                 self.popup.root.destroy()
         
         self.popup.root.after(100, check_running)

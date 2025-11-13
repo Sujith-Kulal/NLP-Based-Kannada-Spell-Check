@@ -10,205 +10,101 @@ import re
 import pickle
 from glob import glob
 from collections import defaultdict
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Tuple
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from kannada_wx_converter import kannada_to_wx, is_kannada_text, wx_to_kannada
 
-# Try to import paradigm generator (optional enhancement)
-try:
-    from paradigm_generator import ParadigmGenerator
-    PARADIGM_GENERATOR_AVAILABLE = True
-except ImportError:
-    PARADIGM_GENERATOR_AVAILABLE = False
-    ParadigmGenerator = None
+PARADIGM_CACHE_VERSION = 1
+PARADIGM_CACHE_FILE = os.path.join("paradigms", "all_words_cache.pkl")
 
-# Try to import morphological paradigm logic (optional enhancement)
-try:
-    from paradigm_logic import initialize_paradigm_system, get_all_surface_forms
-    MORPHOLOGICAL_PARADIGM_AVAILABLE = True
-except ImportError:
-    MORPHOLOGICAL_PARADIGM_AVAILABLE = False
-    initialize_paradigm_system = None
-    get_all_surface_forms = None
-
-
-PRONOUN_VARIANT_GROUPS = [
-    {
-        "base_root": "avaru",
-        "base_prefix": "avar",
-        "variants": [
-            {"root": "avaru", "prefix": "avar"},
-            {"root": "ivaru", "prefix": "ivar"},
-            {"root": "yAru", "prefix": "yAr"},
-            {"root": "evaru", "prefix": "evar"},
-        ],
-    },
-    {
-        "base_root": "avanu",
-        "base_prefix": "avan",
-        "variants": [
-            {"root": "avanu", "prefix": "avan"},
-            {"root": "ivanu", "prefix": "ivan"},
-            {"root": "yAvanu", "prefix": "yAvan"},
-            {"root": "evanu", "prefix": "evan"},
-        ],
-    },
-    {
-        "base_root": "avalYu",
-        "base_prefix": "avalY",
-        "variants": [
-            {"root": "avalYu", "prefix": "avalY"},
-            {"root": "ivalYu", "prefix": "ivalY"},
-            {"root": "yAvalYu", "prefix": "yAvalY"},
-            {"root": "evalYu", "prefix": "evalY"},
-        ],
-    },
-    {
-        "base_root": "avu",
-        "base_prefix": "avu",
-        "variants": [
-            {"root": "avu", "prefix": "avu"},
-            {"root": "ivu", "prefix": "ivu"},
-            {"root": "yAvu", "prefix": "yAvu"},
-            {"root": "evu", "prefix": "evu"},
-        ],
-    },
-    {
-        "base_root": "axu",
-        "base_prefix": "ax",
-        "variants": [
-            {"root": "axu", "prefix": "ax"},
-            {"root": "ixu", "prefix": "ix"},
-            {"root": "yAvuxu", "prefix": "yAvux"},
-            {"root": "exu", "prefix": "ex"},
-        ],
-    },
-]
-
-PRONOUN_ROOTS = {
-    variant["root"]
-    for group in PRONOUN_VARIANT_GROUPS
-    for variant in group["variants"]
-}
-PRONOUN_ROOTS.update(group["base_root"] for group in PRONOUN_VARIANT_GROUPS)
-
-NOUN_VARIANT_GROUPS = [
-    {
-        "label": "akka_avva",
-        "base_root": "akka",
-        "variants": [
-            {"root": "avva"},
-        ],
-    },
-]
-
-PARADIGM_HEADER_PATTERN = re.compile(r"(?P<root>[A-Za-z]+)\((?P<tag>[A-Z]+\d*)\)")
-PARADIGM_FILENAME_PATTERN = re.compile(r"^(?P<root>.*?)(?P<tag>[A-Z]+\d*)$")
+# ❌ REMOVED: Paradigm generator imports (not needed with pre-generated paradigms)
+# All paradigms are now pre-generated and stored in paradigms/all/ folder
 
 
 class SimplifiedSpellChecker:
     """Simplified spell checker - dictionary lookup only"""
 
-    def __init__(self, use_paradigm_generator: bool = True) -> None:
+    def __init__(self, use_paradigm_generator: bool = False) -> None:
+        """
+        Initialize spell checker with pre-generated paradigms
+        NOTE: use_paradigm_generator parameter is kept for backward compatibility but ignored
+        """
         print("\n" + "=" * 70)
         print("Simplified Kannada Spell Checker")
-        print("Dictionary Lookup + Dynamic Morphological Paradigm Expansion")
+        print("Dictionary Lookup + Pre-Generated Morphological Paradigms")
         print("=" * 70)
 
         self.tokenize_func = None
         self._reset_paradigm_structures()
-        
-        # Paradigm generator (optional enhancement)
-        self.paradigm_generator = None
-        self.use_paradigm_generator = use_paradigm_generator and PARADIGM_GENERATOR_AVAILABLE
-        
-        # Morphological paradigm system (optional enhancement)
-        self.morphological_paradigms = None
-        self.use_morphological_paradigms = MORPHOLOGICAL_PARADIGM_AVAILABLE
 
         # 1️⃣ Load tokenizer and dictionary
         self.load_tokenizer()
         self.load_dictionary()
-        
-        # 2️⃣ Initialize optional paradigm systems if available
-        if self.use_paradigm_generator:
-            self._initialize_paradigm_generator()
-        if self.use_morphological_paradigms:
-            self._initialize_morphological_paradigms()
 
-        # 3️⃣ Auto-generate morphological variants dynamically
-        print("\n[+] Generating temporary noun paradigms dynamically ...")
-        generated_noun_forms = 0
-        noun_suffix_rules = ["+na#", "+alli#", "+ige#", "+inda#", "+vu#"]
+        # 2️⃣ All paradigm variants are already generated and stored in paradigms/all/ folder
+        # No dynamic generation needed - all words loaded from paradigms/all/
 
-        for root in list(self.all_words):
-            # Process only WX transliterated (Latin) words
-            if len(root) < 3 or not re.match(r"^[a-zA-Z]+$", root):
-                continue
-
-            for rule in noun_suffix_rules:
-                new_form = self._apply_paradigm_rule(root, root, rule)
-                if new_form not in self.all_words:
-                    self.all_words.add(new_form)
-                    self.paradigm_words.add(new_form)
-                    generated_noun_forms += 1
-
-        print(f"  [auto-paradigms] Added {generated_noun_forms:,} noun forms to dictionary.")
-
-        print("\n[+] Generating temporary verb paradigms dynamically ...")
-        generated_verb_forms = 0
-        verb_suffix_rules = ["u_i#", "u_i_tAne#", "u_i_daru#", "u_i_vu#", "+uva#"]
-
-        for root in list(self.all_words):
-            if len(root) < 3 or not re.match(r"^[a-zA-Z]+$", root):
-                continue
-
-            for rule in verb_suffix_rules:
-                new_form = self._apply_paradigm_rule(root, root, rule)
-                if new_form not in self.all_words:
-                    self.all_words.add(new_form)
-                    self.paradigm_words.add(new_form)
-                    generated_verb_forms += 1
-
-        print(f"  [auto-paradigms] Added {generated_verb_forms:,} verb forms to dictionary.")
-
-        # 4️⃣ Auto-generate full paradigms from paradigm files
-        self.auto_generate_full_paradigms()
-
-        print(f"\n[ready] Total words (with paradigms): {len(self.all_words):,}")
-        print("[✅] Ready for spell checking and morphological lookup!")
+        print(f"\n[ready] Total words loaded from paradigms/all/: {len(self.all_words):,}")
+        print("[✅] Ready for spell checking with fast lookup!")
 
     def _reset_paradigm_structures(self) -> None:
-        """Reset paradigm-related caches"""
+        """Reset dictionary caches"""
         self.all_words: set[str] = set()
-        self.generated_variants: Dict[str, set[str]] = defaultdict(set)
-        self.pronoun_suffix_map: Dict[str, set[str]] = defaultdict(set)
-        self.pronoun_paradigms: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-        self.word_to_paradigms: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-        self._paradigm_cache: Dict[str, List[Dict[str, Any]]] = {}
-        self.paradigm_words: set[str] = set()
-        self.category_paradigms = self._init_category_paradigm_store()
-        self.category_suffixes = self._init_category_suffix_store()
-        self.root_categories: Dict[str, str] = {}
+        # SPEED OPTIMIZATION: Index words by length for faster filtering
+        self.words_by_length: Dict[int, set[str]] = defaultdict(set)
 
-    @staticmethod
-    def _init_category_paradigm_store() -> Dict[str, defaultdict]:
-        return {
-            "pronoun": defaultdict(list),
-            "noun": defaultdict(list),
-            "verb": defaultdict(list),
-            "other": defaultdict(list),
+    def _add_word_to_dictionary(self, word: str) -> None:
+        """Add word to dictionary with length indexing for fast lookups"""
+        if word and word not in self.all_words:
+            self.all_words.add(word)
+            self.words_by_length[len(word)].add(word)
+
+    def _load_dictionary_cache(self, directory_mtime: float) -> Tuple[bool, int]:
+        """Load cached dictionary words if cache is fresh"""
+        if not os.path.exists(PARADIGM_CACHE_FILE):
+            return False, 0
+
+        try:
+            with open(PARADIGM_CACHE_FILE, "rb") as handle:
+                data = pickle.load(handle)
+        except Exception:
+            return False, 0
+
+        if not isinstance(data, dict):
+            return False, 0
+
+        if data.get("version") != PARADIGM_CACHE_VERSION:
+            return False, 0
+
+        if data.get("dir_mtime") != directory_mtime:
+            return False, 0
+
+        words = data.get("words")
+        if not isinstance(words, list):
+            return False, 0
+
+        total_surfaces = int(data.get("surface_count", len(words)))
+        for word in words:
+            self._add_word_to_dictionary(str(word))
+
+        return True, total_surfaces
+
+    def _write_dictionary_cache(self, directory_mtime: float, total_surfaces: int) -> None:
+        """Persist dictionary words for faster future loads"""
+        cache_payload = {
+            "version": PARADIGM_CACHE_VERSION,
+            "dir_mtime": directory_mtime,
+            "surface_count": int(total_surfaces),
+            "words": list(self.all_words),
         }
 
-    @staticmethod
-    def _init_category_suffix_store() -> Dict[str, defaultdict]:
-        return {
-            "pronoun": defaultdict(set),
-            "noun": defaultdict(set),
-            "verb": defaultdict(set),
-            "other": defaultdict(set),
-        }
+        try:
+            os.makedirs(os.path.dirname(PARADIGM_CACHE_FILE), exist_ok=True)
+            with open(PARADIGM_CACHE_FILE, "wb") as handle:
+                pickle.dump(cache_payload, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        except Exception as exc:
+            print(f"  [warn] Unable to write dictionary cache: {exc}")
 
     def load_tokenizer(self) -> None:
         """Load tokenizer if available"""
@@ -223,328 +119,82 @@ class SimplifiedSpellChecker:
             print("  [warn] Falling back to regex tokenizer")
             self.tokenize_func = None
     
-    def _initialize_paradigm_generator(self) -> None:
-        """Initialize paradigm generator for dynamic paradigm expansion"""
-        print("\n[2/4] Initializing Paradigm Generator ...")
-        try:
-            self.paradigm_generator = ParadigmGenerator()
-            all_paradigms = self.paradigm_generator.initialize_paradigms()
-            
-            # Add ALL inflected forms to dictionary (not just base words!)
-            added_count = 0
-            
-            # Method 1: Add all inflected forms directly
-            if hasattr(self.paradigm_generator, 'all_inflected_forms'):
-                for form in self.paradigm_generator.all_inflected_forms:
-                    if form and form not in self.all_words:
-                        self.all_words.add(form)
-                        added_count += 1
-            else:
-                # Fallback: Extract from paradigms
-                for word, forms in all_paradigms.items():
-                    # Add base word
-                    if word not in self.all_words:
-                        self.all_words.add(word)
-                        added_count += 1
-                    # Add all inflected forms
-                    for form in forms.values():
-                        if form and form not in self.all_words:
-                            self.all_words.add(form)
-                            added_count += 1
-            
-            print(f"  [paradigm-gen] Added {added_count:,} paradigm forms to dictionary")
-            if hasattr(self.paradigm_generator, 'stats'):
-                stats = self.paradigm_generator.stats
-                if 'total_inflected_forms' in stats:
-                    print(f"  [paradigm-gen] Total unique forms: {stats['total_inflected_forms']:,}")
-            print("  [ok] Paradigm generator ready")
-        except Exception as e:
-            print(f"  [warn] Paradigm generator failed: {e}")
-            print("  [info] Continuing with standard paradigm loading")
-            import traceback
-            traceback.print_exc()
-            self.paradigm_generator = None
-            self.use_paradigm_generator = False
-    
-    def _initialize_morphological_paradigms(self) -> None:
-        """Initialize morphological paradigm system for dynamic word form generation"""
-        print("\n[3/4] Initializing Morphological Paradigm System ...")
-        try:
-            # Initialize the paradigm system with default configuration
-            self.morphological_paradigms = initialize_paradigm_system()
-            
-            # Extract all surface forms and add to dictionary
-            if self.morphological_paradigms:
-                surface_forms = get_all_surface_forms(self.morphological_paradigms)
-                added_count = 0
-                for form in surface_forms:
-                    if form and form not in self.all_words:
-                        self.all_words.add(form)
-                        added_count += 1
-                
-                print(f"  [morpho-paradigm] Added {added_count:,} morphological forms to dictionary")
-                print(f"  [morpho-paradigm] Total variant paradigms: {len(self.morphological_paradigms):,}")
-            print("  [ok] Morphological paradigm system ready")
-        except Exception as e:
-            print(f"  [warn] Morphological paradigm system failed: {e}")
-            print("  [info] Continuing without morphological paradigm expansion")
-            import traceback
-            traceback.print_exc()
-            self.morphological_paradigms = None
-            self.use_morphological_paradigms = False
+    # ❌ REMOVED: _initialize_paradigm_generator() - Not needed with pre-generated paradigms
+    # ❌ REMOVED: _initialize_morphological_paradigms() - Not needed with pre-generated paradigms
 
     def load_dictionary(self) -> None:
-        """Load base dictionary and build temporary pronoun variants"""
-        step_num = "3/4" if self.use_paradigm_generator else "2/3"
-        print(f"\n[{step_num}] Loading dictionary ...")
+        """Load base dictionary and pre-generated paradigms from paradigms/all/ folder"""
+        print(f"\n[2/3] Loading dictionary from paradigms/all/ ...")
 
         self._reset_paradigm_structures()
 
-        paradigm_summary = self._scan_paradigm_files()
-        if paradigm_summary:
-            ordered = [
-                f"{name}:{paradigm_summary.get(name, 0)}"
-                for name in ("pronoun", "noun", "verb", "other")
-            ]
-            print(f"  [dict] Cached paradigms -> {' | '.join(ordered)}")
+        total_surfaces = 0
+        cache_hit = False
+        directory_mtime = 0.0
+        all_dir = os.path.join("paradigms", "all")
+
+        if os.path.isdir(all_dir):
+            try:
+                directory_mtime = os.path.getmtime(all_dir)
+            except OSError:
+                directory_mtime = 0.0
+
+            if directory_mtime:
+                cache_hit, total_surfaces = self._load_dictionary_cache(directory_mtime)
+
+        if cache_hit:
+            print(f"  [dict] Loaded {len(self.all_words):,} words from cache (surface forms: {total_surfaces:,})")
+        else:
+            total_surfaces, directory_mtime = self._scan_paradigm_files()
+            print(f"  [dict] Loaded {total_surfaces:,} surface forms from paradigms/all/")
+            if directory_mtime:
+                self._write_dictionary_cache(directory_mtime, total_surfaces)
 
         dict_path = "extended_dictionary.pkl"
         if os.path.exists(dict_path):
             with open(dict_path, "rb") as handle:
                 extended = pickle.load(handle)
+                words_to_add = []
                 if isinstance(extended, set):
-                    self.all_words.update(extended)
+                    words_to_add = list(extended)
                 elif isinstance(extended, dict):
                     for words in extended.values():
                         if isinstance(words, set):
-                            self.all_words.update(words)
+                            words_to_add.extend(list(words))
                         elif isinstance(words, dict):
-                            self.all_words.update(words.keys())
-            print("  [dict] Loaded extended dictionary")
-
-        added_variants = self._augment_pronoun_variants()
-        if added_variants:
-            print(f"  [variants] Added {added_variants:,} pronoun variants (temporary)")
-
-        added_noun_variants = self._augment_noun_variants()
-        if added_noun_variants:
-            print(f"  [variants] Added {added_noun_variants:,} noun variants (temporary)")
-
-        print(f"  [dict] Paradigm words (with temp): {len(self.paradigm_words):,}")
+                            words_to_add.extend(list(words.keys()))
+                
+                # Build length index while loading dictionary
+                for word in words_to_add:
+                    self._add_word_to_dictionary(word)
+            print("  [dict] Loaded extended dictionary with length indexing")
 
         print(f"\n  [total] {len(self.all_words):,} words")
 
-    def _scan_paradigm_files(self) -> Dict[str, int]:
-        """Read paradigm files into memory and categorize by word class"""
-        summary_sets: Dict[str, set[str]] = defaultdict(set)
-        category_dirs = {
-            "verb": os.path.join("paradigms", "Verb"),
-            "noun": os.path.join("paradigms", "Noun"),
-            "pronoun": os.path.join("paradigms", "Pronouns"),
-        }
+    def _scan_paradigm_files(self) -> Tuple[int, float]:
+        """Load all surface forms from paradigms/all/ into the dictionary"""
+        all_dir = os.path.join("paradigms", "all")
+        if not os.path.isdir(all_dir):
+            return 0, 0.0
 
-        # Fallback directory for legacy structure
-        legacy_dir = os.path.join("paradigms", "all")
+        dir_mtime = os.path.getmtime(all_dir)
 
-        def _iter_files(directory: str) -> List[str]:
-            if not os.path.isdir(directory):
-                return []
-            # Support nested folders per paradigm
-            pattern = os.path.join(directory, "**", "*.txt")
-            return glob(pattern, recursive=True)
-
-        # Load category-specific paradigms first
-        for category, dir_path in category_dirs.items():
-            for file_path in _iter_files(dir_path):
-                file_name = os.path.basename(file_path)
+        total_surfaces = 0
+        for root_dir, _, files in os.walk(all_dir):
+            for name in files:
+                if not name.endswith(".txt"):
+                    continue
+                file_path = os.path.join(root_dir, name)
                 with open(file_path, "r", encoding="utf-8") as handle:
                     for raw_line in handle:
-                        line = raw_line.strip()
-                        if not line:
+                        stripped = raw_line.strip()
+                        if not stripped:
                             continue
+                        surface = stripped.split(maxsplit=1)[0]
+                        self._add_word_to_dictionary(surface)
+                        total_surfaces += 1
 
-                        parts = line.split(maxsplit=1)
-                        surface = parts[0]
-                        rule = parts[1] if len(parts) > 1 else ""
-
-                        root, tag = self._extract_root_and_tag(rule, file_name)
-                        resolved_category = category
-
-                        record = {
-                            "surface": surface,
-                            "rule": rule,
-                            "source_file": file_name,
-                            "tag": tag,
-                            "category": resolved_category,
-                        }
-
-                        self.all_words.add(surface)
-                        self.paradigm_words.add(surface)
-                        self._paradigm_cache.setdefault(root, []).append(record)
-                        self.category_paradigms[resolved_category][root].append(record)
-                        self.root_categories.setdefault(root, resolved_category)
-
-                        if surface.startswith(root):
-                            suffix = surface[len(root) :]
-                            if suffix:
-                                self.category_suffixes[resolved_category][root].add(suffix)
-
-                        summary_sets[resolved_category].add(root)
-
-        # Legacy fallback to ensure older datasets still load
-        for file_path in _iter_files(legacy_dir):
-            file_name = os.path.basename(file_path)
-            with open(file_path, "r", encoding="utf-8") as handle:
-                for raw_line in handle:
-                    line = raw_line.strip()
-                    if not line:
-                        continue
-
-                    parts = line.split(maxsplit=1)
-                    surface = parts[0]
-                    rule = parts[1] if len(parts) > 1 else ""
-
-                    root, tag = self._extract_root_and_tag(rule, file_name)
-                    category = self._resolve_category(root, tag)
-
-                    record = {
-                        "surface": surface,
-                        "rule": rule,
-                        "source_file": file_name,
-                        "tag": tag,
-                        "category": category,
-                    }
-
-                    self.all_words.add(surface)
-                    self.paradigm_words.add(surface)
-                    self._paradigm_cache.setdefault(root, []).append(record)
-                    self.category_paradigms[category][root].append(record)
-                    self.root_categories.setdefault(root, category)
-
-                    if surface.startswith(root):
-                        suffix = surface[len(root) :]
-                        if suffix:
-                            self.category_suffixes[category][root].add(suffix)
-
-                    summary_sets[category].add(root)
-
-        return {key: len(summary_sets.get(key, set())) for key in self.category_paradigms.keys()}
-
-    def _extract_root_and_tag(self, rule: str, file_name: str) -> tuple[str, str]:
-        """Derive root and tag information from a paradigm line or file name"""
-        match = PARADIGM_HEADER_PATTERN.search(rule)
-        if match:
-            return match.group("root"), match.group("tag")
-
-        stem = file_name.split("_", 1)[0]
-        fallback = PARADIGM_FILENAME_PATTERN.match(stem)
-        if fallback:
-            return fallback.group("root"), fallback.group("tag")
-
-        return stem, ""
-
-    def _resolve_category(self, root: str, tag: str) -> str:
-        """Map paradigm tag information to a coarse word class"""
-        if root in PRONOUN_ROOTS or "PN" in tag:
-            return "pronoun"
-
-        tag_upper = tag.upper()
-        if tag_upper.startswith("V") and not tag_upper.startswith("VN") and "PN" not in tag_upper:
-            return "verb"
-
-        if tag_upper.startswith("N") or tag_upper.startswith("VN") or tag_upper.startswith("EN") or tag_upper.startswith("IN"):
-            return "noun"
-
-        return self.root_categories.get(root, "other") or "other"
-
-    def get_paradigm_records(self, root: str, category: Optional[str] = None) -> List[Dict[str, str]]:
-        """Return cached paradigm records for a root, optionally restricted by category"""
-        if category:
-            return self.category_paradigms.get(category, {}).get(root, [])
-
-        for group in ("pronoun", "noun", "verb", "other"):
-            if root in self.category_paradigms[group]:
-                return self.category_paradigms[group][root]
-        return []
-
-    def create_paradigm_variants(
-        self,
-        base_root: str,
-        variant_root: str,
-        category: Optional[str] = None,
-        store: bool = True,
-        extra_metadata: Optional[Dict[str, str]] = None,
-    ) -> List[Dict[str, Any]]:
-        """Generate paradigm variants for any category and optionally store them"""
-        base_records = self._load_paradigm_records(base_root)
-        if not base_records:
-            return []
-
-        resolved_category = category or self.root_categories.get(base_root, "other") or "other"
-        created: List[Dict[str, Any]] = []
-        seen_surfaces: set[str] = set()
-        metadata = extra_metadata or {}
-        existing_surfaces: set[str] = set()
-
-        if store:
-            existing_surfaces = {
-                entry["surface"]
-                for entry in self.category_paradigms[resolved_category][variant_root]
-            }
-
-        for record in base_records:
-            rule = record.get("rule", "")
-            surface = self._apply_paradigm_rule(base_root, variant_root, rule)
-            if not surface or surface in seen_surfaces:
-                continue
-
-            seen_surfaces.add(surface)
-            was_present = surface in self.all_words
-            info: Dict[str, Any] = {
-                "surface": surface,
-                "original_surface": record.get("surface", ""),
-                "rule": rule,
-                "source_file": record.get("source_file", ""),
-                "base_root": base_root,
-                "variant_root": variant_root,
-                "category": resolved_category,
-                "tag": record.get("tag", ""),
-                "is_new": not was_present,
-            }
-
-            if surface.startswith(variant_root):
-                suffix = surface[len(variant_root) :]
-                if suffix:
-                    info["suffix"] = suffix
-
-            if metadata:
-                info.update(metadata)
-
-            if store:
-                if not was_present:
-                    self.all_words.add(surface)
-                self.paradigm_words.add(surface)
-
-                if surface not in existing_surfaces:
-                    self.category_paradigms[resolved_category][variant_root].append(info)  # type: ignore[arg-type]
-                    existing_surfaces.add(surface)
-
-                self.root_categories.setdefault(variant_root, resolved_category)
-
-                suffix_value = info.get("suffix")
-                if suffix_value:
-                    self.category_suffixes[resolved_category][variant_root].add(suffix_value)  # type: ignore[arg-type]
-
-                word_records = self.word_to_paradigms[surface]
-                if not any(
-                    item.get("base_root") == base_root and item.get("variant_root") == variant_root
-                    for item in word_records
-                ):
-                    word_records.append(info)
-
-            created.append(info)
-
-        return created
+        return total_surfaces, dir_mtime
 
     def tokenize(self, text: str) -> List[str]:
         """Tokenize text using configured tokenizer or fallback"""
@@ -555,10 +205,16 @@ class SimplifiedSpellChecker:
                 pass
         return re.findall(r"[\u0C80-\u0CFF]+|[a-zA-Z]+", text)
 
-    def edit_distance(self, s1: str, s2: str) -> int:
-        """Levenshtein distance"""
+    def edit_distance(self, s1: str, s2: str, max_dist: int = 3) -> int:
+        """Levenshtein distance with early exit optimization"""
         if len(s1) < len(s2):
-            return self.edit_distance(s2, s1)
+            return self.edit_distance(s2, s1, max_dist)
+        
+        # Early exit: if length difference > max_dist, distance will exceed max_dist
+        len_diff = len(s1) - len(s2)
+        if len_diff > max_dist:
+            return len_diff
+        
         if not s2:
             return len(s1)
 
@@ -567,19 +223,67 @@ class SimplifiedSpellChecker:
             current = [i + 1]
             for j, c2 in enumerate(s2):
                 current.append(min(previous[j + 1] + 1, current[j] + 1, previous[j] + (c1 != c2)))
+            
+            # Early exit: if all values in current row exceed max_dist, stop
+            if all(val > max_dist for val in current):
+                return max_dist + 1
+            
             previous = current
         return previous[-1]
 
     def get_suggestions(self, word: str, max_results: int = 10) -> List[str]:
-        """Get edit-distance suggestions for a word"""
-        candidates = [(candidate, self.edit_distance(word, candidate)) for candidate in self.all_words]
-        filtered = [item for item in candidates if item[1] <= 2]
-        filtered.sort(key=lambda item: (item[1], item[0]))
-        return [candidate for candidate, _ in filtered[:max_results]]
+        """Get edit-distance suggestions for a word (ULTRA-OPTIMIZED with length indexing)"""
+        if not word:
+            return []
+        
+        word_len = len(word)
+        word_lower = word.lower()
+        
+        # OPTIMIZATION 1: Use length index to get only relevant candidates (FAST!)
+        # Instead of iterating 123k words, we only check a subset with similar lengths
+        length_delta = 2 if word_len < 6 else 1
+        candidates_by_length = []
+        for length in range(max(1, word_len - length_delta), word_len + length_delta + 1):
+            candidates_by_length.extend(self.words_by_length.get(length, []))
+        
+        # Determine prefix length requirement (longer words require longer shared prefix)
+        prefix_len = 1
+        if word_len >= 5:
+            prefix_len = 2
+        if word_len >= 8:
+            prefix_len = 3
 
-    def get_pronoun_paradigms(self, word: str) -> List[Dict[str, Any]]:
-        """Return cached paradigm entries for a generated pronoun surface"""
-        return self.word_to_paradigms.get(word, [])
+        # OPTIMIZATION 2: Prefix filtering for better accuracy
+        candidates_filtered = []
+        for candidate in candidates_by_length:
+            candidate_lower = candidate.lower()
+
+            if prefix_len > 0 and len(candidate_lower) >= prefix_len:
+                if candidate_lower[:prefix_len] != word_lower[:prefix_len]:
+                    continue
+
+            # OPTIMIZATION 3: Prefix matching (if first 2 chars match, more likely to be similar)
+            if word_len >= 3 and len(candidate) >= 3:
+                # If first char doesn't match AND length is same, check more carefully
+                if candidate_lower[:1] != word_lower[:1] and len(candidate) == word_len:
+                    # Still include but with lower priority by checking first 2 chars
+                    if word_len >= 4 and len(candidate) >= 4 and candidate_lower[:2] != word_lower[:2]:
+                        continue
+            
+            candidates_filtered.append(candidate)
+        
+        # OPTIMIZATION 4: Calculate edit distance only for pre-filtered candidates
+        # Use max_dist=2 for early exit in edit_distance
+        candidates_with_dist = [
+            (candidate, self.edit_distance(word, candidate, max_dist=2))
+            for candidate in candidates_filtered
+        ]
+        
+        # OPTIMIZATION 5: Filter by distance <= 2 and sort
+        filtered = [item for item in candidates_with_dist if item[1] <= 2]
+        filtered.sort(key=lambda item: (item[1], item[0]))
+        
+        return [candidate for candidate, _ in filtered[:max_results]]
 
     def check_text(self, text: str) -> List[Dict[str, List[str]]]:
         """Check text for spelling errors"""
@@ -633,234 +337,6 @@ class SimplifiedSpellChecker:
 
         return errors
 
-    def _augment_pronoun_variants(self) -> int:
-        """Generate temporary pronoun variants and cache paradigm entries"""
-        new_words: set[str] = set()
-
-        for group in PRONOUN_VARIANT_GROUPS:
-            base_root = group["base_root"]
-            if not self._load_paradigm_records(base_root):
-                continue
-
-            for variant in group["variants"]:
-                variant_root = variant["root"]
-                variant_prefix = variant["prefix"]
-
-                infos = self.create_paradigm_variants(
-                    base_root,
-                    variant_root,
-                    category="pronoun",
-                    store=True,
-                    extra_metadata={"variant_prefix": variant_prefix},
-                )
-
-                existing = {entry["surface"] for entry in self.pronoun_paradigms[variant_root]}
-
-                for info in infos:
-                    surface = info["surface"]
-                    if info.get("is_new"):
-                        new_words.add(surface)
-
-                    original = info.get("original_surface")
-                    if isinstance(original, str) and original:
-                        self.generated_variants[surface].add(original)
-
-                    if surface.startswith(variant_prefix):
-                        suffix = surface[len(variant_prefix) :]
-                        if suffix:
-                            self.pronoun_suffix_map[variant_prefix].add(suffix)
-
-                    if surface not in existing:
-                        self.pronoun_paradigms[variant_root].append(info)
-                        existing.add(surface)
-
-        return len(new_words)
-
-    def _augment_noun_variants(self) -> int:
-        """Generate temporary noun variants defined in NOUN_VARIANT_GROUPS"""
-        new_words: set[str] = set()
-
-        for group in NOUN_VARIANT_GROUPS:
-            base_root = group["base_root"]
-            if not self._load_paradigm_records(base_root):
-                continue
-
-            label = group.get("label", base_root)
-
-            for variant in group.get("variants", []):
-                variant_root = variant.get("root")
-                if not variant_root:
-                    continue
-
-                infos = self.create_paradigm_variants(
-                    base_root,
-                    variant_root,
-                    category="noun",
-                    store=True,
-                    extra_metadata={
-                        "variant_group": label,
-                        "variant_type": variant.get("type", "noun_variant"),
-                    },
-                )
-
-                for info in infos:
-                    if info.get("is_new"):
-                        new_words.add(info["surface"])
-
-        return len(new_words)
-
-    def _load_paradigm_records(self, base_root: str) -> List[Dict[str, str]]:
-        """Load paradigm lines for a base root with caching"""
-        if base_root in self._paradigm_cache:
-            return self._paradigm_cache[base_root]
-
-        records: List[Dict[str, str]] = []
-        search_dirs = [
-            os.path.join("paradigms", "Verb"),
-            os.path.join("paradigms", "Noun"),
-            os.path.join("paradigms", "Pronouns"),
-            os.path.join("paradigms", "all"),  # Legacy fallback
-        ]
-
-        for directory in search_dirs:
-            if not os.path.isdir(directory):
-                continue
-            pattern = os.path.join(directory, "**", f"{base_root}*.txt")
-            for file_path in glob(pattern, recursive=True):
-                with open(file_path, "r", encoding="utf-8") as handle:
-                    for line in handle:
-                        parts = line.strip().split(maxsplit=1)
-                        if not parts:
-                            continue
-                        surface = parts[0]
-                        rule = parts[1] if len(parts) > 1 else ""
-                        records.append({
-                            "surface": surface,
-                            "rule": rule,
-                            "source_file": os.path.basename(file_path),
-                        })
-
-        self._paradigm_cache[base_root] = records
-        return records
-
-    def auto_generate_full_paradigms(self) -> None:
-        """
-        Automatically generate full paradigm variants for all base words
-        using paradigm rules and store them in memory for fast lookup.
-        Works for verbs, nouns, and pronouns.
-        """
-        print("\n[+] Auto-generating full morphological paradigms ...")
-        total_generated = 0
-
-        processed_roots: set[str] = set()
-
-        # Process known categories first for precise metadata
-        for category in ("verb", "noun", "pronoun"):
-            for base_root, records in self.category_paradigms[category].items():
-                processed_roots.add(base_root)
-                for record in records:
-                    rule = record.get("rule", "")
-                    surface = self._apply_paradigm_rule(base_root, base_root, rule)
-                    if not surface or surface in self.all_words:
-                        continue
-
-                    self.all_words.add(surface)
-                    self.paradigm_words.add(surface)
-                    total_generated += 1
-
-                    metadata = {
-                        "base_root": base_root,
-                        "rule": rule,
-                        "category": category,
-                        "source_file": record.get("source_file", ""),
-                    }
-                    self.word_to_paradigms[surface].append(metadata)
-
-        # Handle any remaining paradigms (legacy or uncategorized)
-        for base_root, records in self._paradigm_cache.items():
-            if base_root in processed_roots:
-                continue
-            category = self.root_categories.get(base_root, "other")
-            for record in records:
-                rule = record.get("rule", "")
-                surface = self._apply_paradigm_rule(base_root, base_root, rule)
-                if not surface or surface in self.all_words:
-                    continue
-
-                self.all_words.add(surface)
-                self.paradigm_words.add(surface)
-                total_generated += 1
-
-                metadata = {
-                    "base_root": base_root,
-                    "rule": rule,
-                    "category": category,
-                    "source_file": record.get("source_file", ""),
-                }
-                self.word_to_paradigms[surface].append(metadata)
-
-        print(f"  [morph-paradigm] Generated {total_generated:,} forms")
-        print("  [ok] Morphological paradigms ready")
-
-    def expand_all_paradigms(self, root: str) -> set[str]:
-        """Generate all possible paradigm variants for a given root."""
-        all_forms: set[str] = set()
-        for category in ("verb", "noun", "pronoun"):
-            for record in self.category_paradigms.get(category, {}).get(root, []):
-                surface = self._apply_paradigm_rule(root, root, record.get("rule", ""))
-                if surface:
-                    all_forms.add(surface)
-
-        # Include uncategorized/legacy paradigms if available
-        for record in self._paradigm_cache.get(root, []):
-            surface = self._apply_paradigm_rule(root, root, record.get("rule", ""))
-            if surface:
-                all_forms.add(surface)
-
-        return all_forms
-
-    def _apply_paradigm_rule(self, base_root: str, variant_root: str, rule: str) -> str:
-        """
-        Apply a full morphological paradigm rule recursively (Flask-compatible).
-        Handles + and _ segment chains and multiple morphological layers.
-        """
-
-        if not rule:
-            return variant_root
-
-        word = variant_root.strip()
-        rule = rule.strip()
-
-        segments = [seg.strip() for seg in rule.split("+") if seg.strip()]
-
-        for seg in segments:
-            parts = seg.split("_")
-            cleaned = [p.replace("#", "") for p in parts if p]
-
-            if not cleaned:
-                continue
-
-            if len(cleaned) == 1:
-                word += cleaned[0]
-                continue
-
-            left, *rest = cleaned
-
-            # Determine the segment that should be replaced if present
-            replace_target = rest[-1] if rest else ""
-
-            if replace_target and word.endswith(replace_target):
-                word = word[: -len(replace_target)] + left
-            else:
-                word += left
-
-            # Append intermediate morphemes (excluding the final replace target)
-            for extra in rest[:-1]:
-                if extra:
-                    word += extra
-
-        return word
-
 
 # Alias for backward compatibility
 EnhancedSpellChecker = SimplifiedSpellChecker
@@ -869,9 +345,7 @@ EnhancedSpellChecker = SimplifiedSpellChecker
 if __name__ == "__main__":
     checker = SimplifiedSpellChecker()
 
-    # Determine step number based on whether paradigm generator was used
-    step_num = "4/4" if checker.use_paradigm_generator else "3/3"
-    print(f"\n[{step_num}] Sample checks ...")
+    print(f"\n[3/3] Sample checks ...")
     tests = [
         "nAnu bengalUralli iruwweVneV",
         "ನಾನು ಬೆಂಗಳೂರಲ್ಲಿ ಇರುತ್ತೇನೆ",
@@ -882,3 +356,5 @@ if __name__ == "__main__":
         result = checker.check_text(sample)
         status = "[ok] No errors" if not result else f"[issues] {len(result)} error(s)"
         print(f"\n{status}")
+
+
