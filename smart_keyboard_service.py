@@ -75,8 +75,28 @@ class GUITHREADINFO(Structure):
         ("rcCaret", RECT)
     ]
 
+def get_dpi_scale():
+    """Get DPI scaling factor for proper positioning across different displays"""
+    try:
+        # Set DPI awareness
+        windll.shcore.SetProcessDpiAwareness(2)  # PROCESS_PER_MONITOR_DPI_AWARE
+    except:
+        try:
+            windll.user32.SetProcessDPIAware()
+        except:
+            pass
+    
+    try:
+        hdc = windll.user32.GetDC(0)
+        dpi = windll.gdi32.GetDeviceCaps(hdc, 88)  # LOGPIXELSX
+        windll.user32.ReleaseDC(0, hdc)
+        scale = dpi / 96.0  # 96 is default DPI
+        return scale
+    except:
+        return 1.0
+
 def get_caret_position():
-    """Get the screen position of the text caret (insertion point)"""
+    """Get the screen position of the text caret (insertion point) with DPI awareness"""
     try:
         # Get the foreground window and thread
         hwnd = windll.user32.GetForegroundWindow()
@@ -87,21 +107,14 @@ def get_caret_position():
         result = windll.user32.GetGUIThreadInfo(thread_id, byref(gui_info))
         
         if not result:
-            print("⚠️ GetGUIThreadInfo failed, using cursor position")
             return GetCursorPos()
         
         # Get caret window and rectangle
         caret_hwnd = gui_info.hwndCaret
         if not caret_hwnd:
-            print("⚠️ No caret window found, using cursor position")
-            return GetCursorPos()
-        
-        # Get focused window if caret window is 0
-        if not caret_hwnd:
             caret_hwnd = gui_info.hwndFocus
             
         if not caret_hwnd:
-            print("⚠️ No focus window found, using cursor position")
             return GetCursorPos()
         
         # Convert caret rect to screen coordinates
@@ -109,14 +122,40 @@ def get_caret_position():
         point = POINT(caret_rect.left, caret_rect.bottom)
         windll.user32.ClientToScreen(caret_hwnd, byref(point))
         
-        print(f"✅ Caret position: ({point.x}, {point.y})")
         return (point.x, point.y)
     except Exception as e:
-        print(f"❌ Error getting caret position: {e}")
         # Fallback to mouse cursor position
         cursor_pos = GetCursorPos()
-        print(f"⚠️ Using cursor position: {cursor_pos}")
         return cursor_pos
+
+def measure_text_width(text, hwnd=None):
+    """Measure the pixel width of text, particularly for Kannada characters"""
+    try:
+        if not hwnd:
+            hwnd = windll.user32.GetForegroundWindow()
+        
+        hdc = windll.user32.GetDC(hwnd)
+        if not hdc:
+            # Fallback to character count estimation
+            return len(text) * 12
+        
+        # Create SIZE structure for text measurement
+        class SIZE(Structure):
+            _fields_ = [("cx", c_long), ("cy", c_long)]
+        
+        size = SIZE()
+        windll.gdi32.GetTextExtentPoint32W(hdc, text, len(text), byref(size))
+        windll.user32.ReleaseDC(hwnd, hdc)
+        
+        # Apply DPI scaling
+        scale = get_dpi_scale()
+        width = int(size.cx / scale) if scale > 0 else size.cx
+        
+        return max(width, len(text) * 8)  # Minimum width estimation
+    except:
+        # Fallback: estimate based on character count
+        # Kannada characters are typically wider
+        return len(text) * 12
 
 
 # ---------------------------------------------------------------------------
@@ -293,7 +332,14 @@ class UnderlineMarker:
         start_x = max(0, int(absolute_start_x) if absolute_start_x is not None else int(caret_x - width))
         underline_y = 2
         color = line_color or self._line_color
-        effective_duration = self.duration_ms if duration_ms is None else duration_ms
+        
+        # Use passed duration_ms if explicitly provided, otherwise use default behavior
+        # If duration_ms is explicitly None, underline persists forever (no auto-hide)
+        if duration_ms is not None:
+            effective_duration = duration_ms
+        else:
+            # No duration_ms passed, don't auto-hide (persistent underline)
+            effective_duration = None
 
         self.canvas.config(width=width + 4, height=4)
         self.canvas.delete("underline")
@@ -317,17 +363,23 @@ class UnderlineMarker:
         self.window.lift()
         self.visible = True
 
+        # Cancel any existing auto-hide job
         if self._hide_job is not None:
             try:
                 self.window.after_cancel(self._hide_job)
             except tk.TclError:
                 pass
-        if effective_duration is not None:
-            self._hide_job = self.window.after(effective_duration, self.hide)
-        else:
             self._hide_job = None
+        
+        # Only set auto-hide timer if duration is explicitly provided and not None
+        if effective_duration is not None and effective_duration > 0:
+            self._hide_job = self.window.after(effective_duration, self.hide)
+            print(f"⏱️ Underline will auto-hide after {effective_duration}ms")
+        else:
+            print(f"🔒 Underline is PERSISTENT (no auto-hide) - will stay until manually hidden")
 
     def hide(self) -> None:
+        """Hide the underline marker"""
         if self._hide_job is not None:
             try:
                 self.window.after_cancel(self._hide_job)
@@ -341,6 +393,15 @@ class UnderlineMarker:
             except tk.TclError:
                 pass
             self.visible = False
+    
+    def keep_visible(self) -> None:
+        """Ensure underline stays on top and visible (for persistent underlines)"""
+        if self.visible:
+            try:
+                self.window.lift()
+                self.window.attributes("-topmost", True)
+            except tk.TclError:
+                pass
 
     def destroy(self) -> None:
         self.hide()
@@ -368,6 +429,11 @@ class SmartKeyboardService:
         )
         self.no_suggestion_marker = UnderlineMarker(self.popup.root)
         self.paste_markers: List[UnderlineMarker] = []
+        
+        # NEW: Track all misspelled words with persistent underlines
+        self.misspelled_words = {}  # {word: {'marker': UnderlineMarker, 'suggestions': [], 'position': (x, y)}}
+        self.active_misspelled_word = None  # Currently selected misspelled word for correction
+        
         self.caret_step_delay = 0.003
         self.marker_active_word: str = ""
         self.marker_target_hwnd: Optional[int] = None
@@ -413,7 +479,9 @@ class SmartKeyboardService:
         self.selection_range = None
         self.pending_restore = False
         self.restore_allowed = preserve_delimiter
-        if clear_marker:
+        # NOTE: We don't clear markers anymore - misspelled words keep their underlines!
+        # Only hide the temporary suggestion marker
+        if clear_marker and not preserve_delimiter:
             self.hide_no_suggestion_marker()
         if not preserve_delimiter:
             self.trailing_delimiter_count = 0
@@ -450,8 +518,55 @@ class SmartKeyboardService:
         else:
             self.keyboard_controller.type(delimiter)
     
+    def add_persistent_underline(self, word: str, suggestions: list, caret_x: int, caret_y: int, word_width: int, word_start_x: int):
+        """Add a persistent underline for a misspelled word that stays until corrected"""
+        # Don't add duplicate underlines for the same word
+        if word in self.misspelled_words:
+            return
+        
+        try:
+            # Create a new marker for this misspelled word
+            marker = UnderlineMarker(self.popup.root)
+            has_suggestions = len(suggestions) > 0
+            line_color = "#F57C00" if has_suggestions else "#FF3B30"  # Orange or Red
+            
+            # Show persistent underline (duration_ms=None means no auto-hide)
+            marker.show(
+                caret_x=caret_x,
+                caret_y=caret_y,
+                word_length=len(word),
+                delimiter_extra=0,
+                line_color=line_color,
+                duration_ms=None,  # Persistent!
+                absolute_start_x=word_start_x,
+                pixel_width=word_width
+            )
+            
+            # Store the marker and word info
+            self.misspelled_words[word] = {
+                'marker': marker,
+                'suggestions': suggestions,
+                'position': (word_start_x, caret_y),
+                'width': word_width
+            }
+            
+            print(f"{'🟠' if has_suggestions else '🔴'} Added persistent underline for '{word}' - Total misspelled: {len(self.misspelled_words)}")
+            
+        except Exception as exc:
+            print(f"⚠️ Failed to add persistent underline for '{word}': {exc}")
+    
+    def remove_persistent_underline(self, word: str):
+        """Remove the persistent underline for a corrected word"""
+        if word in self.misspelled_words:
+            try:
+                self.misspelled_words[word]['marker'].destroy()
+                del self.misspelled_words[word]
+                print(f"✅ Removed underline for corrected word '{word}' - Remaining: {len(self.misspelled_words)}")
+            except Exception as exc:
+                print(f"⚠️ Failed to remove underline for '{word}': {exc}")
+    
     def hide_no_suggestion_marker(self):
-        """Hide underline overlay if it is showing."""
+        """Hide temporary suggestion overlay (not the persistent ones)"""
         try:
             self.no_suggestion_marker.hide()
         except Exception:
@@ -554,16 +669,56 @@ class SmartKeyboardService:
 
         threading.Thread(target=watcher, args=(hwnd,), daemon=True).start()
 
-    def show_no_suggestion_marker(self, word: str):
-        """Underline the last word in the active editor when no suggestions are available."""
+    def show_no_suggestion_marker(self, word: str, has_suggestions: bool = False, persist: bool = True, suggestions: list = None):
+        """Show persistent underline directly beneath the misspelled Kannada word.
+        
+        Args:
+            word: The word to underline
+            has_suggestions: True if suggestions available (orange), False for severe errors (red)
+            persist: If True, underline stays until word is corrected/replaced
+            suggestions: List of suggestions for this word
+        """
         if not word or not self.enabled:
             return
 
-        caret_x, caret_y = get_caret_position()
-        delimiter_extra = 0
         try:
-            self.no_suggestion_marker.show(caret_x, caret_y, len(word), delimiter_extra=delimiter_extra)
-            self.marker_active_word = word
+            # Get current caret position (end of word)
+            caret_x, caret_y = get_caret_position()
+            
+            # Measure the actual pixel width of the Kannada word
+            hwnd = windll.user32.GetForegroundWindow()
+            word_width = measure_text_width(word, hwnd)
+            
+            # Calculate word start position (caret is at end, move back by word width)
+            word_start_x = caret_x - word_width
+            
+            if persist:
+                # Add to persistent underlines - this will stay visible!
+                self.add_persistent_underline(
+                    word=word,
+                    suggestions=suggestions or [],
+                    caret_x=caret_x,
+                    caret_y=caret_y,
+                    word_width=word_width,
+                    word_start_x=word_start_x
+                )
+            else:
+                # Show temporary underline (old behavior)
+                line_color = "#F57C00" if has_suggestions else "#FF3B30"
+                duration = 2200
+                
+                self.no_suggestion_marker.show(
+                    caret_x=caret_x,
+                    caret_y=caret_y,
+                    word_length=len(word),
+                    delimiter_extra=0,
+                    line_color=line_color,
+                    duration_ms=duration,
+                    absolute_start_x=word_start_x,
+                    pixel_width=word_width
+                )
+                self.marker_active_word = word
+            
         except Exception as exc:
             print(f"⚠️ Unable to underline word '{word}': {exc}")
     
@@ -715,8 +870,15 @@ class SmartKeyboardService:
                 print(f"🔍 Suggestions found: {suggestions}")
                 
                 if had_error:
-                    self.show_no_suggestion_marker(last_pasted_word)
+                    has_suggestions = len(suggestions) > 0
+                    self.show_no_suggestion_marker(
+                        last_pasted_word, 
+                        has_suggestions=has_suggestions, 
+                        persist=True,
+                        suggestions=suggestions
+                    )
                 else:
+                    self.remove_persistent_underline(last_pasted_word)
                     self.hide_no_suggestion_marker()
 
                 if suggestions:
@@ -800,6 +962,11 @@ class SmartKeyboardService:
             
             self.replacing = False  # Reset flag after replacement complete
             print("✅ Replacement complete")
+            
+            # Remove the persistent underline for the OLD misspelled word
+            self.remove_persistent_underline(self.last_word)
+            
+            # Hide the temporary marker and reset
             self.hide_no_suggestion_marker()
             self.reset_current_word(preserve_delimiter=True, clear_marker=False)
             
@@ -1052,12 +1219,21 @@ class SmartKeyboardService:
                         self.words_checked += 1
                         suggestions, had_error = self.get_suggestions(word)
                         if had_error:
-                            self.show_no_suggestion_marker(word)
+                            has_suggestions = len(suggestions) > 0
+                            # Add persistent underline that stays until word is corrected
+                            self.show_no_suggestion_marker(
+                                word, 
+                                has_suggestions=has_suggestions, 
+                                persist=True,
+                                suggestions=suggestions
+                            )
                             if suggestions:
                                 self.popup.show(suggestions)
                             else:
                                 self.popup.hide()
                         else:
+                            # Word is correct - remove any existing underline for this word
+                            self.remove_persistent_underline(word)
                             self.popup.hide()
                             self.hide_no_suggestion_marker()
                 else:
@@ -1173,9 +1349,18 @@ class SmartKeyboardService:
         except Exception as e:
             print(f"\n⚠️ Service stopped: {e}")
         finally:
+            # Clean up all persistent underlines
+            self.cleanup_all_underlines()
             if listener.running:
                 listener.stop()
             print("\n✅ Service stopped successfully\n")
+    
+    def cleanup_all_underlines(self):
+        """Remove all persistent underlines when service stops"""
+        print(f"\n🧹 Cleaning up {len(self.misspelled_words)} persistent underlines...")
+        for word in list(self.misspelled_words.keys()):
+            self.remove_persistent_underline(word)
+        print("✅ All underlines cleaned up")
 
 
 def main():
