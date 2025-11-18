@@ -373,6 +373,62 @@ class CaretTracker:
         
         return None
 
+    def get_text_via_ui_automation(self, hwnd: Optional[int] = None) -> Optional[str]:
+        """
+        Get full visible text from a target window without simulating keystrokes.
+        Uses UI Automation TextPattern so we never have to type Ctrl+A / Ctrl+C.
+        """
+        if not self._uia or not UI_AUTOMATION_AVAILABLE:
+            return None
+        
+        try:
+            if not hwnd:
+                hwnd = windll.user32.GetForegroundWindow()
+            if not hwnd:
+                return None
+            
+            element = self._uia.ElementFromHandle(hwnd)
+            if not element:
+                return None
+            
+            text_pattern = None
+            for pattern_id in (UIA.UIA_TextPattern2Id, UIA.UIA_TextPatternId):
+                try:
+                    text_pattern = element.GetCurrentPattern(pattern_id)
+                except Exception:
+                    text_pattern = None
+                if text_pattern:
+                    break
+            
+            if not text_pattern:
+                return None
+            
+            text_range = None
+            try:
+                text_range = text_pattern.DocumentRange
+            except Exception:
+                text_range = None
+            
+            if not text_range:
+                try:
+                    visible_ranges = text_pattern.GetVisibleRanges()
+                    if visible_ranges and visible_ranges.Length > 0:
+                        text_range = visible_ranges.GetElement(0)
+                except Exception:
+                    text_range = None
+            
+            if not text_range:
+                return None
+            
+            text = text_range.GetText(-1)
+            if text is not None:
+                return text
+        
+        except Exception as e:
+            print(f"⚠️ UI Automation text fetch error: {e}")
+        
+        return None
+
 
 # ---------------------------------------------------------------------------
 # Transparent Overlay Window (The "Fake" Underline Layer)
