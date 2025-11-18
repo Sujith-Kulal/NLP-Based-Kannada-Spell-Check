@@ -3,14 +3,20 @@
 Test Script: Grammarly-Style Fake Underlines in Notepad
 =========================================================
 
-This script demonstrates the fake underline system working in Notepad.
+This script demonstrates the fake underline system with Grammarly-level accuracy:
+
+✅ FIX 1: Real font metrics from Notepad (WM_GETFONT + GetTextMetricsW)
+✅ FIX 2: DPI scaling support for 4K displays (GetDpiForWindow)
+✅ FIX 3: UI Automation TextPattern2 for pixel-perfect positioning
+
+Works on ANY laptop/PC with ANY screen resolution and DPI setting!
 
 Instructions:
 1. Run this script
 2. Open Notepad
-3. Type some Kannada text with spelling errors
+3. Type some text with spelling errors
 4. Watch red wavy underlines appear (like Grammarly!)
-5. The underlines are transparent overlays, NOT real underlines
+5. Move/resize Notepad - underlines follow perfectly!
 
 Press Ctrl+C to stop.
 """
@@ -26,24 +32,26 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from grammarly_underline_system import UnderlineOverlayWindow, CaretTracker, WordPositionCalculator
 
 def test_fake_underlines_in_notepad():
-    """Test fake underlines in Notepad"""
+    """Test fake underlines in Notepad with full Grammarly accuracy"""
     print("\n" + "="*70)
-    print("🎯 Testing Grammarly-Style Fake Underlines in Notepad")
+    print("🎯 Testing Grammarly-Style Fake Underlines (DPI + Font + UIA)")
     print("="*70)
     print("\n📝 Instructions:")
     print("1. Open Notepad (notepad.exe)")
     print("2. Type some text: 'This is a tset word'")
     print("3. Watch for red wavy underline under 'tset'")
-    print("4. The underline is a FAKE overlay, not real!")
-    print("\n⚠️ Press Ctrl+C to stop\n")
+    print("4. The underline works on ANY screen resolution!")
+    print("\n✅ NEW: Uses actual font metrics + DPI scaling + UI Automation")
+    print("⚠️ Press Ctrl+C to stop\n")
     
     # Create Tkinter root
     root = tk.Tk()
     root.withdraw()
     
-    # Create overlay system
+    # Create overlay system with enhanced tracking
     overlay = UnderlineOverlayWindow(root)
     tracker = CaretTracker()
+    calculator = WordPositionCalculator(tracker)
     
     # Show overlay
     time.sleep(2)  # Wait for user to open Notepad
@@ -57,6 +65,25 @@ def test_fake_underlines_in_notepad():
     
     if notepad_hwnd:
         print(f"✅ Found Notepad window: {notepad_hwnd}")
+        
+        # Display detected capabilities
+        dpi_scale = tracker.get_dpi_scale_factor(notepad_hwnd)
+        print(f"✅ Detected DPI scale: {dpi_scale*100:.0f}% (DPI: {int(dpi_scale*96)})")
+        
+        font_metrics = tracker.get_font_metrics(notepad_hwnd)
+        if font_metrics:
+            print(f"✅ Font metrics detected:")
+            print(f"   - Height: {font_metrics.tmHeight}px")
+            print(f"   - Avg Width: {font_metrics.tmAveCharWidth}px")
+            print(f"   - Max Width: {font_metrics.tmMaxCharWidth}px")
+        else:
+            print("⚠️ Font metrics fallback (estimation mode)")
+        
+        if hasattr(tracker, '_uia') and tracker._uia:
+            print("✅ UI Automation TextPattern2 available (pixel-perfect mode)")
+        else:
+            print("⚠️ UI Automation unavailable (using fallback positioning)")
+        
         overlay.show(notepad_hwnd)
         print("👁️ Overlay is now active over Notepad!")
         print("\n💡 Type 'tset' in Notepad to see a fake underline appear\n")

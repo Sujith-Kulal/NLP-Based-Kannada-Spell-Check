@@ -445,10 +445,10 @@ class SmartKeyboardService:
             on_close_callback=self.on_popup_close
         )
         
-        # Initialize Grammarly-style fake underline overlay
+        # Initialize Grammarly-style fake underline overlay with DPI + Font + UIA support
         self.underline_overlay = UnderlineOverlayWindow(self.popup.root)
-        self.caret_tracker = CaretTracker()
-        self.word_position_calc = WordPositionCalculator()
+        self.caret_tracker = CaretTracker()  # Now with font metrics, DPI, and UI Automation
+        self.word_position_calc = WordPositionCalculator(self.caret_tracker)
         
         # Legacy markers (will be phased out)
         self.no_suggestion_marker = UnderlineMarker(self.popup.root)
