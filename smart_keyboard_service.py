@@ -28,47 +28,26 @@ import os
 import time
 import threading
 import tkinter as tk
-from ctypes import wintypes, windll, byref, Structure, c_long, c_ulong, pointer, POINTER, sizeof, create_unicode_buffer
+from ctypes import wintypes, windll, byref, Structure, c_long, c_ulong, c_short, pointer, POINTER, sizeof, create_unicode_buffer
 from win32api import GetCursorPos
 import signal
 import win32clipboard
 import re
 import win32gui
 import win32con
-from typing import List, Optional, Tuple
-
-# Add project paths
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
-# Import spell checker
-from enhanced_spell_checker import EnhancedSpellChecker
-from kannada_wx_converter import is_kannada_text
-
-# Import Grammarly-style fake underline system
-from grammarly_underline_system import (
-    UnderlineOverlayWindow,
-    CaretTracker,
-    WordPositionCalculator
-)
-
-try:
-    from pynput import keyboard, mouse
-    from pynput.keyboard import Key, Controller
-    from pynput.mouse import Button
-except ImportError:
-    print("❌ Error: Required packages not installed")
-    print("Install: pip install pywin32 pynput")
-    sys.exit(1)
+from typing import List, Optional, Tuple, Dict
 
 
 # ---------------------------------------------------------------------------
-# Windows API structures for caret position
+# Windows API structures for caret position and metrics
 # ---------------------------------------------------------------------------
 class POINT(Structure):
     _fields_ = [("x", c_long), ("y", c_long)]
 
+
 class RECT(Structure):
     _fields_ = [("left", c_long), ("top", c_long), ("right", c_long), ("bottom", c_long)]
+
 
 class GUITHREADINFO(Structure):
     _fields_ = [
@@ -83,87 +62,103 @@ class GUITHREADINFO(Structure):
         ("rcCaret", RECT)
     ]
 
+
 def get_dpi_scale():
     """Get DPI scaling factor for proper positioning across different displays"""
     try:
-        # Set DPI awareness
-        windll.shcore.SetProcessDpiAwareness(2)  # PROCESS_PER_MONITOR_DPI_AWARE
-    except:
+        windll.shcore.SetProcessDpiAwareness(2)
+    except Exception:
         try:
             windll.user32.SetProcessDPIAware()
-        except:
+        except Exception:
             pass
-    
+
     try:
         hdc = windll.user32.GetDC(0)
-        dpi = windll.gdi32.GetDeviceCaps(hdc, 88)  # LOGPIXELSX
+        dpi = windll.gdi32.GetDeviceCaps(hdc, 88)
         windll.user32.ReleaseDC(0, hdc)
-        scale = dpi / 96.0  # 96 is default DPI
+        scale = dpi / 96.0
         return scale
-    except:
+    except Exception:
         return 1.0
+
 
 def get_caret_position():
     """Get the screen position of the text caret (insertion point) with DPI awareness"""
     try:
-        # Get the foreground window and thread
         hwnd = windll.user32.GetForegroundWindow()
         thread_id = windll.user32.GetWindowThreadProcessId(hwnd, 0)
-        
-        # Get GUI thread info for the foreground window's thread
+
         gui_info = GUITHREADINFO(cbSize=sizeof(GUITHREADINFO))
         result = windll.user32.GetGUIThreadInfo(thread_id, byref(gui_info))
-        
+
         if not result:
             return GetCursorPos()
-        
-        # Get caret window and rectangle
+
         caret_hwnd = gui_info.hwndCaret
         if not caret_hwnd:
             caret_hwnd = gui_info.hwndFocus
-            
+
         if not caret_hwnd:
             return GetCursorPos()
-        
-        # Convert caret rect to screen coordinates
+
         caret_rect = gui_info.rcCaret
         point = POINT(caret_rect.left, caret_rect.bottom)
         windll.user32.ClientToScreen(caret_hwnd, byref(point))
-        
         return (point.x, point.y)
-    except Exception as e:
-        # Fallback to mouse cursor position
-        cursor_pos = GetCursorPos()
-        return cursor_pos
+    except Exception:
+        return GetCursorPos()
 
-def measure_text_width(text, hwnd=None):
+
+def measure_text_width(text: str, hwnd: Optional[int] = None) -> int:
     """Measure the pixel width of text, particularly for Kannada characters"""
+    if text is None:
+        return 0
+
     try:
         if not hwnd:
             hwnd = windll.user32.GetForegroundWindow()
-        
+
         hdc = windll.user32.GetDC(hwnd)
         if not hdc:
-            # Fallback to character count estimation
             return len(text) * 12
-        
-        # Create SIZE structure for text measurement
+
         class SIZE(Structure):
             _fields_ = [("cx", c_long), ("cy", c_long)]
-        
+
         size = SIZE()
         windll.gdi32.GetTextExtentPoint32W(hdc, text, len(text), byref(size))
         windll.user32.ReleaseDC(hwnd, hdc)
-        
-        # Apply DPI scaling
+
         scale = get_dpi_scale()
         width = int(size.cx / scale) if scale > 0 else size.cx
-        
-        return max(width, len(text) * 8)  # Minimum width estimation
-    except:
-        # Fallback: estimate based on character count
-        # Kannada characters are typically wider
+        return max(width, len(text) * 8)
+    except Exception:
         return len(text) * 12
+
+
+# Add project paths
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+# Import spell checker and Kannada utilities
+from enhanced_spell_checker import EnhancedSpellChecker
+from kannada_wx_converter import is_kannada_text
+
+# Import Grammarly-style overlay helpers
+from grammarly_underline_system import (
+    UnderlineOverlayWindow,
+    CaretTracker,
+    WordPositionCalculator
+)
+
+try:
+    from pynput import keyboard, mouse
+    from pynput.keyboard import Key, Controller
+    from pynput.mouse import Button
+except ImportError:
+    print("❌ Error: Required packages not installed")
+    print("Install: pip install pywin32 pynput")
+    sys.exit(1)
 
 
 # ---------------------------------------------------------------------------
@@ -341,6 +336,14 @@ class SmartKeyboardService:
         self.trailing_delimiter_count = 0  # Number of consecutive delimiters after last word
         self.last_delimiter_char = ' '  # Track the delimiter that triggered suggestion
         self.restore_allowed = False  # Allow one restore after trailing delimiters
+        self.last_paste_anchor = None  # Snapshot of caret/window state before paste
+        self.default_text_margin_px = 18
+        self.default_baseline_offset_px = 32
+        self.default_line_height_px = 28
+        self.paste_cooldown_until = 0.0  # Timestamp until per-key checks resume after paste
+        self.layout_horizontal_padding_px = 12  # Safety padding when simulating client width
+        self.layout_tab_stop_spaces = 4  # Approximate tab stop spacing (Notepad default = 8, but Kannada wider)
+        self.layout_min_char_px = 6  # Guard for zero-width glyphs during layout
 
         print("\n✅ Smart Keyboard Service initialized!")
         print("\n📝 Controls:")
@@ -852,107 +855,353 @@ class SmartKeyboardService:
                     print(f"📝 Updated document word {word_index}: '{old_word}' → '{new_word}'")
                     break
 
+    def capture_paste_anchor(self):
+        """Snapshot caret and window geometry just before a paste."""
+        try:
+            anchor_x, anchor_y = get_caret_position()
+        except Exception:
+            anchor_x = None
+            anchor_y = None
+
+        try:
+            hwnd = windll.user32.GetForegroundWindow()
+        except Exception:
+            hwnd = None
+
+        text_hwnd = None
+        selection_start = None
+        caret_rect = None
+        if hwnd:
+            try:
+                thread_id = windll.user32.GetWindowThreadProcessId(hwnd, 0)
+                gui_info = GUITHREADINFO(cbSize=sizeof(GUITHREADINFO))
+                if windll.user32.GetGUIThreadInfo(thread_id, byref(gui_info)):
+                    text_hwnd = gui_info.hwndCaret or gui_info.hwndFocus or hwnd
+                    caret_rect = gui_info.rcCaret
+                    if text_hwnd:
+                        start_index = wintypes.DWORD()
+                        end_index = wintypes.DWORD()
+                        try:
+                            windll.user32.SendMessageW(
+                                text_hwnd,
+                                win32con.EM_GETSEL,
+                                byref(start_index),
+                                byref(end_index)
+                            )
+                            selection_start = start_index.value
+                        except Exception:
+                            selection_start = None
+            except Exception:
+                text_hwnd = None
+
+        window_rect = None
+        if hwnd:
+            try:
+                window_rect = win32gui.GetWindowRect(hwnd)
+            except Exception:
+                window_rect = None
+
+        relative_x = None
+        relative_y = None
+        if window_rect and anchor_x is not None and anchor_y is not None:
+            relative_x = anchor_x - window_rect[0]
+            relative_y = anchor_y - window_rect[1]
+
+        line_height = self._estimate_line_height(text_hwnd or hwnd)
+
+        self.last_paste_anchor = {
+            'absolute_x': anchor_x,
+            'absolute_y': anchor_y,
+            'relative_x': relative_x,
+            'relative_y': relative_y,
+            'hwnd': hwnd,
+            'text_hwnd': text_hwnd,
+            'window_rect': window_rect,
+            'line_height': line_height,
+            'caret_rect': caret_rect,
+            'selection_start': selection_start,
+            'timestamp': time.time(),
+        }
+
+    def _estimate_line_height(self, hwnd: Optional[int]) -> int:
+        """Best-effort line height (pixels) for the target window."""
+        line_height = self.default_line_height_px
+        if not hwnd:
+            return line_height
+        try:
+            metrics = self.caret_tracker.get_font_metrics(hwnd)
+            scale = self.caret_tracker.get_dpi_scale_factor(hwnd)
+            if metrics:
+                line_height = metrics.tmHeight + metrics.tmExternalLeading
+            if scale and scale > 0:
+                line_height = int(line_height * scale)
+        except Exception:
+            pass
+        return max(16, line_height)
+
+    def _start_paste_cooldown(self, duration: float = 0.3):
+        """Pause keystroke-based processing for a short, Grammarly-style cooldown."""
+        self.paste_cooldown_until = max(self.paste_cooldown_until, time.time() + max(0.0, duration))
+
+    def _in_paste_cooldown(self) -> bool:
+        """Return True while paste processing is still settling."""
+        return time.time() < self.paste_cooldown_until
+
+    def _resolve_paste_anchor_geometry(self) -> Optional[dict]:
+        """Build a geometry snapshot for paste underline placement."""
+        anchor = (self.last_paste_anchor or {}).copy()
+        hwnd = anchor.get('hwnd')
+        if not hwnd:
+            try:
+                hwnd = windll.user32.GetForegroundWindow()
+            except Exception:
+                hwnd = None
+
+        window_rect = anchor.get('window_rect')
+        if not window_rect and hwnd:
+            try:
+                window_rect = win32gui.GetWindowRect(hwnd)
+            except Exception:
+                window_rect = None
+
+        base_x = anchor.get('absolute_x')
+        rel_x = anchor.get('relative_x')
+        if base_x is None and window_rect and rel_x is not None:
+            base_x = window_rect[0] + rel_x
+        if base_x is None and window_rect:
+            base_x = window_rect[0] + self.default_text_margin_px
+
+        base_y = anchor.get('absolute_y')
+        rel_y = anchor.get('relative_y')
+        if base_y is None and window_rect and rel_y is not None:
+            base_y = window_rect[1] + rel_y
+        if base_y is None and window_rect:
+            base_y = window_rect[1] + self.default_baseline_offset_px
+
+        if base_x is None or base_y is None:
+            try:
+                fallback_x, fallback_y = get_caret_position()
+                base_x = base_x if base_x is not None else fallback_x
+                base_y = base_y if base_y is not None else fallback_y
+            except Exception:
+                pass
+
+        if base_x is None or base_y is None:
+            return None
+
+        line_height = anchor.get('line_height') or self._estimate_line_height(hwnd)
+
+        return {
+            'hwnd': hwnd,
+            'text_hwnd': anchor.get('text_hwnd'),
+            'window_rect': window_rect,
+            'base_x': base_x,
+            'base_y': base_y,
+            'line_height': line_height,
+            'selection_start': anchor.get('selection_start'),
+            'caret_rect': anchor.get('caret_rect')
+        }
+
+    def _build_notepad_layout(
+        self,
+        full_text: str,
+        spans: List[re.Match],
+        geometry: dict
+    ) -> Dict[int, dict]:
+        """Return per-word geometry using the edit control's own layout data."""
+        if not full_text or not spans or not geometry:
+            return {}
+
+        text_hwnd = geometry.get('text_hwnd') or geometry.get('hwnd')
+        selection_start = geometry.get('selection_start')
+        if not text_hwnd or selection_start is None:
+            return {}
+
+        layout: Dict[int, dict] = {}
+        origin_x = 0
+        origin_y = 0
+        ascent = None
+        line_height = geometry.get('line_height', self.default_line_height_px)
+
+        try:
+            origin_x, origin_y = win32gui.ClientToScreen(text_hwnd, (0, 0))
+        except Exception:
+            origin_x = origin_y = 0
+
+        hdc = None
+        old_font = None
+        try:
+            hdc = win32gui.GetDC(text_hwnd)
+            if not hdc:
+                return {}
+
+            hfont = win32gui.SendMessage(text_hwnd, win32con.WM_GETFONT, 0, 0)
+            if hfont:
+                try:
+                    old_font = win32gui.SelectObject(hdc, hfont)
+                except Exception:
+                    old_font = None
+
+            try:
+                metrics = win32gui.GetTextMetrics(hdc)
+                ascent = metrics.get('tmAscent')
+                tm_height = metrics.get('tmHeight')
+                tm_external = metrics.get('tmExternalLeading', 0)
+                if tm_height:
+                    line_height = max(line_height, tm_height + tm_external)
+            except Exception:
+                ascent = None
+
+            for span_idx, match in enumerate(spans):
+                word = match.group(0)
+                if not word:
+                    continue
+
+                char_start = selection_start + match.start()
+                char_end = char_start + len(word)
+
+                start_pos = windll.user32.SendMessageW(text_hwnd, win32con.EM_POSFROMCHAR, char_start, 0)
+                if start_pos in (-1, 0xFFFFFFFF):
+                    continue
+                start_x = c_short(start_pos & 0xFFFF).value
+                start_y = c_short((start_pos >> 16) & 0xFFFF).value
+
+                end_pos = windll.user32.SendMessageW(text_hwnd, win32con.EM_POSFROMCHAR, char_end, 0)
+                if end_pos in (-1, 0xFFFFFFFF):
+                    end_x = start_x + measure_text_width(word, text_hwnd)
+                    end_y = start_y
+                else:
+                    end_x = c_short(end_pos & 0xFFFF).value
+                    end_y = c_short((end_pos >> 16) & 0xFFFF).value
+
+                screen_start_x = origin_x + start_x
+                screen_start_y = origin_y + start_y
+                screen_end_x = origin_x + end_x
+                screen_end_y = origin_y + end_y
+
+                if screen_end_y != screen_start_y:
+                    word_width = measure_text_width(word, text_hwnd)
+                else:
+                    word_width = max(self.layout_min_char_px, screen_end_x - screen_start_x)
+
+                if word_width <= 0:
+                    word_width = measure_text_width(word, text_hwnd)
+
+                if ascent is not None:
+                    baseline_y = screen_start_y + ascent
+                else:
+                    baseline_y = screen_start_y + line_height
+
+                layout[span_idx] = {
+                    'start_x': screen_start_x,
+                    'baseline_y': baseline_y,
+                    'width': word_width
+                }
+        finally:
+            if hdc:
+                if old_font:
+                    try:
+                        win32gui.SelectObject(hdc, old_font)
+                    except Exception:
+                        pass
+                try:
+                    win32gui.ReleaseDC(text_hwnd, hdc)
+                except Exception:
+                    pass
+
+        return layout
+
     def process_pasted_text_for_underlines(self, full_text: str):
-        """Iterate through pasted text and underline every non-correct Kannada word."""
+        """One-shot paste pass that measures every word from the window edge.
+
+        Correct Paste Handling Logic:
+        "When a paste event is detected, disable the normal keystroke-based
+        spell-checking and instead run a single full-sentence pass. Then
+        re-enable normal keystroke checking after a short delay."
+        """
         if not full_text:
             return
+
+        # Keep extending the cooldown while this batch runs to avoid keystroke overlap.
+        self._start_paste_cooldown(0.8)
 
         spans = list(re.finditer(r'[^\s\n\r\t.,!?;:]+', full_text))
         if not spans:
             return
 
+        geometry_snapshot = self._resolve_paste_anchor_geometry()
+
         def worker():
             try:
                 self.replacing = True
                 self.popup.hide()
+                geometry = geometry_snapshot or self._resolve_paste_anchor_geometry()
+                if not geometry:
+                    print("⚠️ Unable to resolve paste geometry; skipping underline placement.")
+                    return
 
-                total_chars = len(full_text)
-                # Move caret back to the start of the pasted content
-                self.move_caret_left(total_chars)
-                time.sleep(0.06)
-
-                target_hwnd = windll.user32.GetForegroundWindow()
+                target_hwnd = geometry['hwnd']
+                window_rect = geometry['window_rect']
+                line_height = geometry['line_height']
+                layout_map = self._build_notepad_layout(full_text, spans, geometry)
+                if not layout_map:
+                    print("⚠️ Unable to rebuild Notepad layout; skipping paste underlines.")
+                    return
+                last_popup_data: Optional[Tuple[str, List[str]]] = None
 
                 for idx, match in enumerate(spans):
+                    layout_info = layout_map.get(idx)
+                    if not layout_info:
+                        continue
+                    word_width = layout_info['width']
+                    caret_y = layout_info['baseline_y']
+                    word_start_x = layout_info['start_x']
                     word = match.group(0)
                     word_len = len(word)
+                    is_kannada_word = word_len >= 2 and any(self.is_kannada_char(c) for c in word)
 
-                    # Advance caret to the end of the current word
-                    self.move_caret_right(word_len)
-                    time.sleep(0.02)
+                    if not is_kannada_word:
+                        continue
 
-                    if any(self.is_kannada_char(c) for c in word) and word_len >= 2:
-                        suggestions, had_error = self.get_suggestions(word)
-                        if had_error:
-                            start_x = None
-                            start_y = None
+                    suggestions, had_error = self.get_suggestions(word)
+                    if not had_error:
+                        continue
 
-                            # Walk caret back to measure start boundary
-                            self.move_caret_left(word_len)
-                            time.sleep(0.02)
-                            try:
-                                start_x, start_y = get_caret_position()
-                            except Exception:
-                                start_x = None
-                                start_y = None
+                    caret_x = word_start_x + word_width
 
-                            # Return caret to end of the word
-                            self.move_caret_right(word_len)
-                            time.sleep(0.02)
-                            try:
-                                end_x, end_y = get_caret_position()
-                            except Exception:
-                                end_x, end_y = (0, 0)
+                    relative_start = None
+                    relative_y = None
+                    if window_rect:
+                        relative_start = word_start_x - window_rect[0]
+                        relative_y = caret_y - window_rect[1]
 
-                            pixel_width = None
-                            absolute_start = None
-                            caret_y = end_y
+                    self.add_persistent_underline(
+                        word=word,
+                        suggestions=suggestions,
+                        caret_x=caret_x,
+                        caret_y=caret_y,
+                        word_width=word_width,
+                        word_start_x=word_start_x,
+                        hwnd=target_hwnd,
+                        window_rect=window_rect,
+                        relative_start_x=relative_start,
+                        relative_y=relative_y,
+                    )
 
-                            if (
-                                start_x is not None
-                                and start_y is not None
-                                and abs(end_y - start_y) < 30
-                            ):
-                                width_px = end_x - start_x
-                                if width_px >= 4:
-                                    pixel_width = width_px
-                                    absolute_start = start_x
+                    if suggestions:
+                        last_popup_data = (word, suggestions)
 
-                            # Fallbacks if measurement failed
-                            underline_width = pixel_width or measure_text_width(word, target_hwnd)
-                            underline_start = absolute_start or (end_x - underline_width)
+                if last_popup_data:
+                    word, suggestions = last_popup_data
 
-                            window_rect = None
-                            try:
-                                window_rect = win32gui.GetWindowRect(target_hwnd)
-                            except Exception:
-                                window_rect = None
+                    def _show_last_popup():
+                        self.last_word = word
+                        self.popup.show(suggestions)
 
-                            relative_start = None
-                            relative_y = None
-                            if window_rect:
-                                relative_start = underline_start - window_rect[0]
-                                relative_y = caret_y - window_rect[1]
-
-                            self.add_persistent_underline(
-                                word=word,
-                                suggestions=suggestions,
-                                caret_x=end_x,
-                                caret_y=caret_y,
-                                word_width=underline_width,
-                                word_start_x=underline_start,
-                                hwnd=target_hwnd,
-                                window_rect=window_rect,
-                                relative_start_x=relative_start,
-                                relative_y=relative_y,
-                            )
-
-                    # Skip delimiters between this word and the next
-                    next_start = spans[idx + 1].start() if idx + 1 < len(spans) else len(full_text)
-                    delimiter_count = max(0, next_start - match.end())
-                    if delimiter_count:
-                        self.move_caret_right(delimiter_count)
-                        time.sleep(0.015)
+                    try:
+                        self.popup.root.after(0, _show_last_popup)
+                    except Exception:
+                        pass
 
             except Exception as exc:
                 print(f"❌ Error processing pasted words for underlines: {exc}")
@@ -960,11 +1209,12 @@ class SmartKeyboardService:
                 traceback.print_exc()
             finally:
                 self.replacing = False
+                self.last_paste_anchor = None
 
         threading.Thread(target=worker, daemon=True).start()
     
     def check_pasted_text(self):
-        """Check if text was pasted and show suggestions for last word"""
+        """Entry point invoked after Ctrl+V settles; runs the one-shot paste pass."""
         try:
             clipboard_text = self.get_clipboard_text()
             print(f"🔍 Clipboard content: {repr(clipboard_text)}")
@@ -982,36 +1232,6 @@ class SmartKeyboardService:
             
             if words and self.enabled and not self.replacing:
                 self.process_pasted_text_for_underlines(clipboard_text)
-                # Check the last word pasted
-                last_pasted_word = words[-1]
-                self.last_word = last_pasted_word
-                print(f"🔍 Checking last pasted word: '{last_pasted_word}'")
-                suggestions, had_error = self.get_suggestions(last_pasted_word)
-                print(f"🔍 Suggestions found: {suggestions}")
-                
-                if had_error:
-                    has_suggestions = len(suggestions) > 0
-                    self.show_no_suggestion_marker(
-                        last_pasted_word,
-                        has_suggestions=has_suggestions,
-                        suggestions=suggestions
-                    )
-                else:
-                    self.remove_persistent_underline(last_pasted_word)
-
-                if suggestions:
-                    print(f"✅ Showing suggestions for pasted word: '{last_pasted_word}'")
-                    self.popup.show(suggestions)
-                else:
-                    print(f"ℹ️ No suggestions for: '{last_pasted_word}'")
-                    self.popup.hide()
-                
-                # Check all words from start to end after paste (solves paste problem!)
-                print("📝 Checking all words from start to end after paste...")
-                threading.Thread(
-                    target=self.check_all_words_from_start_to_end,
-                    daemon=True
-                ).start()
             else:
                 print(f"⚠️ No Kannada words found or service disabled")
         except Exception as e:
@@ -1111,6 +1331,8 @@ class SmartKeyboardService:
             if self.replacing:
                 return
 
+            in_paste_cooldown = self._in_paste_cooldown()
+
             # Track Shift key for selection handling
             if key in (Key.shift, Key.shift_r):
                 self.shift_pressed = True
@@ -1130,6 +1352,9 @@ class SmartKeyboardService:
                     is_v_key = True
                 
                 if is_v_key:
+                    self._start_paste_cooldown(0.8)
+                    in_paste_cooldown = True
+                    self.capture_paste_anchor()
                     # Ctrl+V detected - schedule clipboard check after paste completes
                     print("📋 Paste detected - checking clipboard...")
                     threading.Timer(0.3, self.check_pasted_text).start()
@@ -1361,37 +1586,43 @@ class SmartKeyboardService:
                 self.last_delimiter_char = char
                 self.trailing_delimiter_count += 1
                 # ✅ ALWAYS check and hide popup, even if word is empty
-                if self.current_word_chars and self.enabled and not self.replacing:
-                    word = ''.join(self.current_word_chars)
+                word = ''.join(self.current_word_chars) if self.current_word_chars else ""
+                if self.current_word_chars:
                     self.last_committed_word_chars = self.current_word_chars.copy()
+
+                if self.current_word_chars and self.enabled and not self.replacing:
                     print(f"🔍 Buffer at delimiter: {self.current_word_chars} (cursor @ {self.cursor_index}) → Word: '{word}'")
-                    
-                    # Check if this is the word we just replaced (within 0.5 seconds)
-                    time_since_replacement = time.time() - self.last_replacement_time
-                    if word == self.last_replaced_word and time_since_replacement < 0.5:
-                        print(f"⏭️ Skipping check - just replaced this word")
+
+                    if in_paste_cooldown:
+                        print("⏸️ Skipping keystroke-based check during paste cooldown")
                         self.popup.hide()
-                        self.last_replaced_word = ""  # Clear it
                     else:
-                        self.last_word = word  # Store the word for replacement
-                        self.words_checked += 1
-                        suggestions, had_error = self.get_suggestions(word)
-                        if had_error:
-                            has_suggestions = len(suggestions) > 0
-                            # Add persistent underline that stays until word is corrected
-                            self.show_no_suggestion_marker(
-                                word,
-                                has_suggestions=has_suggestions,
-                                suggestions=suggestions
-                            )
-                            if suggestions:
-                                self.popup.show(suggestions)
-                            else:
-                                self.popup.hide()
-                        else:
-                            # Word is correct - remove any existing underline for this word
-                            self.remove_persistent_underline(word)
+                        # Check if this is the word we just replaced (within 0.5 seconds)
+                        time_since_replacement = time.time() - self.last_replacement_time
+                        if word == self.last_replaced_word and time_since_replacement < 0.5:
+                            print(f"⏭️ Skipping check - just replaced this word")
                             self.popup.hide()
+                            self.last_replaced_word = ""  # Clear it
+                        else:
+                            self.last_word = word  # Store the word for replacement
+                            self.words_checked += 1
+                            suggestions, had_error = self.get_suggestions(word)
+                            if had_error:
+                                has_suggestions = len(suggestions) > 0
+                                # Add persistent underline that stays until word is corrected
+                                self.show_no_suggestion_marker(
+                                    word,
+                                    has_suggestions=has_suggestions,
+                                    suggestions=suggestions
+                                )
+                                if suggestions:
+                                    self.popup.show(suggestions)
+                                else:
+                                    self.popup.hide()
+                            else:
+                                # Word is correct - remove any existing underline for this word
+                                self.remove_persistent_underline(word)
+                                self.popup.hide()
                 else:
                     # ✅ Hide popup if no word was typed (multiple spaces, etc.)
                     self.popup.hide()
