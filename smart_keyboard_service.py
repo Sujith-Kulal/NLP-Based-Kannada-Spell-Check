@@ -354,6 +354,7 @@ class SmartKeyboardService:
             0: 6,   # First line nudge downward slightly
         }
         self.paste_default_line_offset_px = -8  # Fallback shift for any additional lines
+        self.document_wipe_check_pending = False  # Prevent duplicate wipe checks
 
         print("\n✅ Smart Keyboard Service initialized!")
         print("\n📝 Controls:")
@@ -665,6 +666,35 @@ class SmartKeyboardService:
                 print(f"⚠️ Failed to remove overlay underline {candidate}: {reason}")
 
         return removed_any
+
+    def _clear_all_underlines(self):
+        """Remove every tracked underline from overlay and cache."""
+        try:
+            self.underline_overlay.clear_all_underlines()
+        except Exception as exc:
+            print(f"⚠️ Error clearing overlay underlines: {exc}")
+        with self.underline_lock:
+            self.misspelled_words.clear()
+        self.last_underline_id = None
+
+    def _schedule_document_wipe_check(self, delay: float = 0.15):
+        """If a bulk delete happens, clear all underlines once text disappears."""
+        if self.document_wipe_check_pending or not self.misspelled_words:
+            return
+
+        self.document_wipe_check_pending = True
+
+        def worker():
+            try:
+                time.sleep(delay)
+                text = self.get_document_text()
+                if not text or not text.strip():
+                    print("🧼 Document cleared – removing all underlines")
+                    self._clear_all_underlines()
+            finally:
+                self.document_wipe_check_pending = False
+
+        threading.Thread(target=worker, daemon=True).start()
     
     def on_mouse_click(self, x, y, button, pressed):
         """Handle mouse clicks to detect clicks on underlined words"""
@@ -1524,6 +1554,9 @@ class SmartKeyboardService:
                 self.just_replaced_word = False
 
             in_paste_cooldown = self._in_paste_cooldown()
+
+            if key in (Key.backspace, Key.delete):
+                self._schedule_document_wipe_check()
 
             # Track Shift key for selection handling
             if key in (Key.shift, Key.shift_r):
