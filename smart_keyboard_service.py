@@ -611,8 +611,11 @@ class SmartKeyboardService:
                 f"'{word}' (id={uid}) - Total misspelled: {total}"
             )
 
+            return uid
+
         except Exception as exc:
             print(f"⚠️ Failed to add persistent underline for '{word}': {exc}")
+            return None
     
     def remove_persistent_underline(
         self,
@@ -834,7 +837,7 @@ class SmartKeyboardService:
                 relative_start = word_start_x - window_rect[0]
                 relative_y = (caret_y + self.underline_vertical_offset_px) - window_rect[1]
             
-            self.add_persistent_underline(
+            underline_id = self.add_persistent_underline(
                 word=word,
                 suggestions=suggestions or [],
                 caret_x=caret_x,
@@ -846,9 +849,11 @@ class SmartKeyboardService:
                 relative_start_x=relative_start,
                 relative_y=relative_y
             )
+            return underline_id
             
         except Exception as exc:
             print(f"⚠️ Unable to underline word '{word}': {exc}")
+            return None
     
     def get_clipboard_text(self):
         """Get text from clipboard safely"""
@@ -1338,7 +1343,7 @@ class SmartKeyboardService:
                         relative_start = word_start_x - window_rect[0]
                         relative_y = (caret_y + self.underline_vertical_offset_px) - window_rect[1]
 
-                    self.add_persistent_underline(
+                    underline_id = self.add_persistent_underline(
                         word=word,
                         suggestions=suggestions,
                         caret_x=caret_x,
@@ -1352,13 +1357,15 @@ class SmartKeyboardService:
                     )
 
                     if suggestions:
-                        last_popup_data = (word, suggestions)
+                        last_popup_data = (word, suggestions, underline_id)
 
                 if last_popup_data:
-                    word, suggestions = last_popup_data
+                    word, suggestions, underline_id = last_popup_data
 
                     def _show_last_popup():
                         self.last_word = word
+                        if underline_id:
+                            self.last_underline_id = underline_id
                         self.popup.show(suggestions)
 
                     try:
@@ -1801,14 +1808,19 @@ class SmartKeyboardService:
                             if had_error:
                                 has_suggestions = len(suggestions) > 0
                                 # Add persistent underline that stays until word is corrected
-                                self.show_no_suggestion_marker(
+                                underline_id = self.show_no_suggestion_marker(
                                     word,
                                     has_suggestions=has_suggestions,
                                     suggestions=suggestions
                                 )
                                 if suggestions:
+                                    if underline_id:
+                                        self.last_underline_id = underline_id
                                     self.popup.show(suggestions)
                                 else:
+                                    if underline_id:
+                                        # reset so unrelated words don't reuse the id
+                                        self.last_underline_id = underline_id
                                     self.popup.hide()
                             else:
                                 # Word is correct - remove any existing underline for this word
