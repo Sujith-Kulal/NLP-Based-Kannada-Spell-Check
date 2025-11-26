@@ -26,6 +26,7 @@ Press Esc twice to stop the service
 import sys
 import os
 import time
+import uuid
 import threading
 import tkinter as tk
 from ctypes import wintypes, windll, byref, Structure, c_long, c_ulong, c_short, pointer, POINTER, sizeof, create_unicode_buffer
@@ -303,7 +304,7 @@ class SmartKeyboardService:
         self.underline_focus_min_px = 28
         self.underline_lock = threading.Lock()
 
-        # Track all misspelled words with persistent underlines
+        # Track all misspelled words with persistent underlines (keyed by unique underline id)
         self.misspelled_words = {}
         
         # Document-wide word tracking dictionary
@@ -311,6 +312,7 @@ class SmartKeyboardService:
         #                       'position': int, 'has_error': bool, 'checked': bool}}
         self.document_words = {}  # Dictionary to store all words in document
         self.word_index_counter = 0  # Counter for unique word indices
+        self.underline_sequence = 0  # Counter for persistent underline ids
         self.document_text_cache = ""  # Cache of last known document text
         self.document_lock = threading.Lock()  # Lock for document_words access
         
@@ -321,6 +323,7 @@ class SmartKeyboardService:
         self.enabled = True
         self.words_checked = 0
         self.last_word = ""  # Store last word for replacement
+        self.last_underline_id: Optional[str] = None  # Track specific underline instance
         self.running = False  # Service running flag
         self.replacing = False  # Flag to prevent re-showing popup during replacement
         self.last_esc_time = 0  # Track last Esc press for double-tap detection
@@ -504,44 +507,62 @@ class SmartKeyboardService:
         return start_x, start_y
 
     def _remove_underlines_near_caret(self, tolerance: int = 8) -> bool:
-        """Heuristic: remove the underline closest to the caret, if any."""
+        """Remove underline markers that intersect the current caret location."""
+
         try:
             caret_x, caret_y = get_caret_position()
         except Exception:
             return False
 
-        best_word = None
-        best_distance = None
-
         with self.underline_lock:
-            items = list(self.misspelled_words.items())
+            underline_items = list(self.misspelled_words.items())
 
-        for word, info in items:
-            start_x, start_y = self._resolve_absolute_position(info)
-            width = info.get('width', 0)
-            if start_x is None or start_y is None or width <= 0:
-                continue
-            inside_span = start_x <= caret_x <= start_x + width
-            near_span = (
-                start_x - tolerance <= caret_x <= start_x + width + tolerance
-                and start_y - tolerance <= caret_y <= start_y + 20 + tolerance
-            )
-            if not inside_span and not near_span:
+        removal_candidates = []
+        for uid, info in underline_items:
+            width = info.get('width', 0) or 0
+            if width <= 0:
                 continue
 
-            if inside_span:
-                distance = 0
-            else:
-                distance = min(abs(caret_x - start_x), abs(caret_x - (start_x + width)))
+            word_x, word_y = info.get('absolute_position', (0, 0))
+            hwnd = info.get('hwnd')
+            rel_x = info.get('relative_start_x')
+            rel_y = info.get('relative_y')
 
-            if best_word is None or distance < best_distance:
-                best_word = word
-                best_distance = distance
+            rect = None
+            if hwnd and rel_x is not None and rel_y is not None:
+                try:
+                    rect = win32gui.GetWindowRect(hwnd)
+                except Exception:
+                    rect = None
+                if rect:
+                    word_x = rect[0] + rel_x
+                    word_y = rect[1] + rel_y
 
-        if best_word:
-            self.remove_persistent_underline(best_word)
-            return True
-        return False
+            bbox = info.get('bbox') or {}
+            left = bbox.get('left', word_x)
+            right = bbox.get('right', word_x + width)
+            top = bbox.get('top', word_y - (tolerance * 2))
+            bottom = bbox.get('bottom', word_y + (tolerance * 2))
+
+            if rect and rel_x is not None and rel_y is not None:
+                left = word_x - tolerance
+                right = word_x + width + tolerance
+                top = word_y - (tolerance * 2)
+                bottom = word_y + (tolerance * 2)
+
+            horizontal_hit = left <= caret_x <= right
+            vertical_hit = top <= caret_y <= bottom
+
+            if horizontal_hit and vertical_hit:
+                removal_candidates.append((uid, info.get('word')))
+
+        removed_any = False
+        for candidate, word in removal_candidates:
+            if self.remove_persistent_underline(uid=candidate):
+                print(f"🧽 Cleared underline id={candidate} near caret for '{word}'")
+                removed_any = True
+
+        return removed_any
 
     def type_delimiter_key(self, delimiter):
         """Re-type the delimiter that triggered the suggestion"""
@@ -573,37 +594,17 @@ class SmartKeyboardService:
         relative_start_x: Optional[int] = None,
         relative_y: Optional[int] = None,
     ):
-        """
-        Add a persistent Grammarly-style fake underline for a misspelled word.
-        This creates a transparent overlay window with red wavy line beneath the word.
-        """
-        with self.underline_lock:
-            if word in self.misspelled_words:
-                return
-
+        """Add or update an underline entry with a stable unique ID."""
         try:
-            # Determine underline color and style
             has_suggestions = len(suggestions) > 0
-            color = "#F57C00" if has_suggestions else "#FF3B30"  # Orange or Red
-            style = "wavy"  # Wavy underline for spelling errors (like Grammarly)
-            
-            # Show overlay if not already visible
+            color = "#F57C00" if has_suggestions else "#FF3B30"
+            style = "wavy"
+
             if not self.underline_overlay.visible:
                 self.underline_overlay.show(hwnd)
-            
-            # Add fake underline to the transparent overlay
+
             underline_y = caret_y + self.underline_vertical_offset_px
 
-            self.underline_overlay.add_underline(
-                word_id=word,
-                word_x=word_start_x,
-                word_y=underline_y,
-                word_width=word_width,
-                color=color,
-                style=style,
-                hwnd=hwnd
-            )
-            
             rect = window_rect
             if hwnd and rect is None:
                 try:
@@ -619,39 +620,101 @@ class SmartKeyboardService:
                 if rel_y is None:
                     rel_y = underline_y - rect[1]
 
-            info = {
-                'suggestions': suggestions,
-                'relative_start_x': rel_start,
-                'relative_y': rel_y,
-                'hwnd': hwnd,
-                'last_rect': rect,
-                'absolute_position': (word_start_x, underline_y),
-                'width': word_width
+            bbox = {
+                'left': word_start_x,
+                'top': underline_y - 14,
+                'right': word_start_x + word_width,
+                'bottom': underline_y + 14,
             }
 
-            # Store the marker and word info
             with self.underline_lock:
-                self.misspelled_words[word] = info
+                underline_index = self.underline_sequence
+                self.underline_sequence += 1
+                uid = f"{word}-{underline_index:04d}-{uuid.uuid4().hex[:6]}"
+
+                underline_info = {
+                    'id': uid,
+                    'word': word,
+                    'suggestions': suggestions,
+                    'hwnd': hwnd,
+                    'absolute_position': (word_start_x, underline_y),
+                    'relative_start_x': rel_start,
+                    'relative_y': rel_y,
+                    'width': word_width,
+                    'bbox': bbox,
+                    'last_rect': rect,
+                    'added_at': time.time(),
+                }
+
+                self.misspelled_words[uid] = underline_info
                 total = len(self.misspelled_words)
 
-            print(f"{'🟠' if has_suggestions else '🔴'} Added persistent underline for '{word}' - Total misspelled: {total}")
+            self.underline_overlay.add_underline(
+                word_id=uid,
+                word_x=word_start_x,
+                word_y=underline_y,
+                word_width=word_width,
+                color=color,
+                style=style,
+                hwnd=hwnd,
+            )
+
+            print(
+                f"{'🟠' if has_suggestions else '🔴'} Added persistent underline for "
+                f"'{word}' (id={uid}) - Total misspelled: {total}"
+            )
 
         except Exception as exc:
             print(f"⚠️ Failed to add persistent underline for '{word}': {exc}")
     
-    def remove_persistent_underline(self, word: str):
-        """Remove the persistent fake underline for a corrected word."""
-        # Remove from Grammarly-style overlay
-        try:
-            self.underline_overlay.remove_underline(word)
-        except Exception as e:
-            print(f"⚠️ Error removing overlay underline: {e}")
-        
+    def remove_persistent_underline(
+        self,
+        word: Optional[str] = None,
+        uid: Optional[str] = None,
+    ) -> bool:
+        """Remove persistent underline entries by unique ID or by word."""
+
+        if not word and not uid:
+            return False
+
+        removed_any = False
+        removed_count = 0
+        failed = []
+
         with self.underline_lock:
-            removed = self.misspelled_words.pop(word, None)
+            candidates = []
+            if uid:
+                if uid in self.misspelled_words:
+                    candidates.append(uid)
+            elif word:
+                candidates = [
+                    entry_id
+                    for entry_id, info in self.misspelled_words.items()
+                    if info.get('word') == word
+                ]
+
+            for candidate in candidates:
+                info = self.misspelled_words.pop(candidate, None)
+                if not info:
+                    continue
+                removed_any = True
+                removed_count += 1
+                try:
+                    self.underline_overlay.remove_underline(candidate)
+                except Exception as exc:
+                    failed.append((candidate, str(exc)))
+
+        if removed_any:
             remaining = len(self.misspelled_words)
-        if removed is not None:
-            print(f"✅ Removed underline for corrected word '{word}' - Remaining: {remaining}")
+            target_desc = uid or word
+            print(
+                f"✅ Removed {removed_count} underline(s) for '{target_desc}' - Remaining: {remaining}"
+            )
+        if failed:
+            for candidate, reason in failed:
+                print(f"⚠️ Failed to remove overlay underline {candidate}: {reason}")
+
+        return removed_any
     
     def on_mouse_click(self, x, y, button, pressed):
         """Handle mouse clicks to detect clicks on underlined words"""
@@ -665,7 +728,8 @@ class SmartKeyboardService:
             underline_items = list(self.misspelled_words.items())
 
         # Check if click is within the underlined word area (with some tolerance)
-        for word, info in underline_items:
+        for uid, info in underline_items:
+            word = info.get('word')
             rect = None
             word_x, word_y = info.get('absolute_position', (0, 0))
             hwnd = info.get('hwnd')
@@ -680,17 +744,30 @@ class SmartKeyboardService:
                     word_x = rect[0] + rel_x
                     word_y = rect[1] + rel_y
 
-            word_width = info['width']
-            
-            tolerance = 10
-            if (word_x - tolerance <= x <= word_x + word_width + tolerance and
-                word_y - tolerance <= y <= word_y + 20 + tolerance):
+            word_width = info.get('width', 0)
+            if word_width <= 0:
+                continue
+
+            bbox = info.get('bbox') or {}
+            left = bbox.get('left', word_x)
+            right = bbox.get('right', word_x + word_width)
+            top = bbox.get('top', word_y - 14)
+            bottom = bbox.get('bottom', word_y + 18)
+
+            if rect and rel_x is not None and rel_y is not None:
+                left = word_x - 4
+                right = word_x + word_width + 4
+                top = word_y - 14
+                bottom = word_y + 18
+
+            if left <= x <= right and top <= y <= bottom:
                 
                 # User clicked on this underlined word!
                 suggestions = info['suggestions']
                 print(f"🖱️ Clicked on underlined word '{word}' - showing suggestions")
                 
                 if suggestions:
+                    self.last_underline_id = uid
                     self.last_word = word
                     self.popup.show(suggestions)
                 else:
@@ -1383,7 +1460,12 @@ class SmartKeyboardService:
             self.update_document_word(self.last_word, chosen_word)
             
             # Remove the persistent underline for the OLD misspelled word
-            self.remove_persistent_underline(self.last_word)
+            removed = False
+            if self.last_underline_id:
+                removed = self.remove_persistent_underline(uid=self.last_underline_id)
+            if not removed and self.last_word:
+                self.remove_persistent_underline(self.last_word)
+            self.last_underline_id = None
             
             self.reset_current_word(preserve_delimiter=True, clear_marker=False)
             
@@ -1396,6 +1478,7 @@ class SmartKeyboardService:
         except Exception as e:
             print(f"⚠️ Replacement failed: {e}")
             self.replacing = False
+            self.last_underline_id = None
 
     def on_press(self, key):
         """Handle key press events"""
