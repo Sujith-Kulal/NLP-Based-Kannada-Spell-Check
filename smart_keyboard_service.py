@@ -344,6 +344,66 @@ class SmartKeyboardService:
         self.layout_horizontal_padding_px = 12  # Safety padding when simulating client width
         self.layout_tab_stop_spaces = 4  # Approximate tab stop spacing (Notepad default = 8, but Kannada wider)
         self.layout_min_char_px = 6  # Guard for zero-width glyphs during layout
+        self.underline_vertical_offset_px = 0  # Pixels below baseline for overlay underline rendering
+        self.paste_line_offsets = {
+            0: 6,   # First line nudge downward slightly
+            # 1: -8,
+            # 2: -8,
+            # 3: -8,
+            # 4: -8,
+            1: -8,
+            2: -8,
+            3: -8,
+            4: -8,
+            5: -8,
+            6: -8,
+            7: -8,
+            8: -8,
+            9: -8,
+            10: -8,
+            11: -8,
+            12: -8,
+            13: -8,
+            14: -8,
+            15: -8,
+            16: -8,
+            17: -8,
+            18: -8,
+            19: -8,
+            20: -8,
+            21: -8,
+            22: -8,
+            23: -8,
+            24: -8,
+            25: -8,
+            26: -8,
+            27: -8,
+            28: -8,
+            29: -8,
+            30: -8,
+            31: -8,
+            32: -8,
+            33: -8,
+            34: -8,
+            35: -8,
+            36: -8,
+            37: -8,
+            38: -8,
+            39: -8,
+            40: -8,
+            41: -8,
+            42: -8,
+            43: -8,
+            44: -8,
+            45: -8,
+            46: -8,
+            47: -8,
+            48: -8,
+            49: -8,
+            50: -8,
+  # Second line stays tight at the current position
+        }
+        self.paste_default_line_offset_px = -4  # Fallback shift for any additional lines
 
         print("\n✅ Smart Keyboard Service initialized!")
         print("\n📝 Controls:")
@@ -532,10 +592,12 @@ class SmartKeyboardService:
                 self.underline_overlay.show(hwnd)
             
             # Add fake underline to the transparent overlay
+            underline_y = caret_y + self.underline_vertical_offset_px
+
             self.underline_overlay.add_underline(
                 word_id=word,
                 word_x=word_start_x,
-                word_y=caret_y + 2,  # Position slightly below text
+                word_y=underline_y,
                 word_width=word_width,
                 color=color,
                 style=style,
@@ -555,7 +617,7 @@ class SmartKeyboardService:
                 if rel_start is None:
                     rel_start = word_start_x - rect[0]
                 if rel_y is None:
-                    rel_y = caret_y - rect[1]
+                    rel_y = underline_y - rect[1]
 
             info = {
                 'suggestions': suggestions,
@@ -563,7 +625,7 @@ class SmartKeyboardService:
                 'relative_y': rel_y,
                 'hwnd': hwnd,
                 'last_rect': rect,
-                'absolute_position': (word_start_x, caret_y),
+                'absolute_position': (word_start_x, underline_y),
                 'width': word_width
             }
 
@@ -602,7 +664,7 @@ class SmartKeyboardService:
         with self.underline_lock:
             underline_items = list(self.misspelled_words.items())
 
-        # Check if click is near any underlined word
+        # Check if click is within the underlined word area (with some tolerance)
         for word, info in underline_items:
             rect = None
             word_x, word_y = info.get('absolute_position', (0, 0))
@@ -620,7 +682,6 @@ class SmartKeyboardService:
 
             word_width = info['width']
             
-            # Check if click is within the underlined word area (with some tolerance)
             tolerance = 10
             if (word_x - tolerance <= x <= word_x + word_width + tolerance and
                 word_y - tolerance <= y <= word_y + 20 + tolerance):
@@ -688,7 +749,7 @@ class SmartKeyboardService:
             relative_y = None
             if window_rect:
                 relative_start = display_start_x - window_rect[0]
-                relative_y = caret_y - window_rect[1]
+                relative_y = (caret_y + self.underline_vertical_offset_px) - window_rect[1]
             
             # Always use persistent overlays now
             self.add_persistent_underline(
@@ -1088,9 +1149,21 @@ class SmartKeyboardService:
                     word_width = measure_text_width(word, text_hwnd)
 
                 if ascent is not None:
-                    baseline_y = screen_start_y + ascent
+                    baseline_offset = ascent
                 else:
-                    baseline_y = screen_start_y + line_height
+                    baseline_offset = line_height
+
+                if line_height > 0:
+                    line_number = max(0, int(start_y / line_height))
+                else:
+                    line_number = 0
+
+                line_offset = self.paste_line_offsets.get(
+                    line_number,
+                    self.paste_default_line_offset_px,
+                )
+
+                baseline_y = screen_start_y + baseline_offset + line_offset
 
                 layout[span_idx] = {
                     'start_x': screen_start_x,
@@ -1173,7 +1246,7 @@ class SmartKeyboardService:
                     relative_y = None
                     if window_rect:
                         relative_start = word_start_x - window_rect[0]
-                        relative_y = caret_y - window_rect[1]
+                        relative_y = (caret_y + self.underline_vertical_offset_px) - window_rect[1]
 
                     self.add_persistent_underline(
                         word=word,
