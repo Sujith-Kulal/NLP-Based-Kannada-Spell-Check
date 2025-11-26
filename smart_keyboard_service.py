@@ -326,6 +326,8 @@ class SmartKeyboardService:
         self.last_underline_id: Optional[str] = None  # Track specific underline instance
         self.running = False  # Service running flag
         self.replacing = False  # Flag to prevent re-showing popup during replacement
+        self.disable_scanning = False  # Skip key processing while programmatically inserting text
+        self.just_replaced_word = False  # Track whether the last action was a replacement
         self.last_esc_time = 0  # Track last Esc press for double-tap detection
         self.last_clipboard_content = ""  # Track clipboard for paste detection
         self.clipboard_check_active = False  # Flag to enable clipboard monitoring
@@ -1422,21 +1424,22 @@ class SmartKeyboardService:
     
     def replace_word(self, chosen_word):
         """Replace the misspelled word with chosen suggestion"""
+        print(f"✅ Replacing with: '{chosen_word}'")
+        self.replacing = True
+        self.disable_scanning = True
         try:
-            print(f"✅ Replacing with: '{chosen_word}'")
-            self.replacing = True  # Set flag to prevent re-triggering
-            self.last_replaced_word = chosen_word  # Remember what we just replaced
-            self.last_replacement_time = time.time()  # Remember when
-            self.popup.hide()  # Ensure popup is hidden
+            self.last_replaced_word = chosen_word
+            self.last_replacement_time = time.time()
+            self.popup.hide()
             time.sleep(0.05)
 
             delimiter = self.last_delimiter_char or ' '
-            
+
             # Remove the delimiter (space) that triggered the suggestion
             self.keyboard_controller.press(Key.backspace)
             self.keyboard_controller.release(Key.backspace)
             time.sleep(0.01)
-            
+
             # Select the previous word using Ctrl+Shift+Left
             self.keyboard_controller.press(Key.ctrl)
             self.keyboard_controller.press(Key.shift)
@@ -1445,31 +1448,29 @@ class SmartKeyboardService:
             self.keyboard_controller.release(Key.shift)
             self.keyboard_controller.release(Key.ctrl)
             time.sleep(0.01)
-            
+
             # Delete the selected word
             self.keyboard_controller.press(Key.delete)
             self.keyboard_controller.release(Key.delete)
             time.sleep(0.02)
-            
+
             # Type the chosen word
             self.keyboard_controller.type(chosen_word)
             time.sleep(0.01)
-            self.last_committed_word_chars = list(chosen_word)
-            
+
             # Re-type the original delimiter so spacing stays consistent
             self.type_delimiter_key(delimiter)
             self.last_delimiter_char = delimiter
             self.trailing_delimiter_count = 1
-            
+
             # Wait longer before resetting flag to ensure space is fully processed
             time.sleep(0.15)
-            
-            self.replacing = False  # Reset flag after replacement complete
+
             print("✅ Replacement complete")
-            
+
             # Update document dictionary with the replacement
             self.update_document_word(self.last_word, chosen_word)
-            
+
             # Remove the persistent underline for the OLD misspelled word
             removed = False
             if self.last_underline_id:
@@ -1477,19 +1478,30 @@ class SmartKeyboardService:
             if not removed and self.last_word:
                 self.remove_persistent_underline(self.last_word)
             self.last_underline_id = None
-            
-            self.reset_current_word(preserve_delimiter=True, clear_marker=False)
-            
+
+            # Clear buffers to prevent reprocessing the replaced word
+            self.current_word_chars = []
+            self.cursor_index = 0
+            self.last_committed_word_chars = []
+            self.pending_restore = False
+            self.restore_allowed = False
+            self.selection_anchor = None
+            self.selection_range = None
+            self.just_replaced_word = True
+
             # Re-check all words from start to end in background
             threading.Thread(
                 target=self.check_all_words_from_start_to_end,
                 daemon=True
             ).start()
-            
+
         except Exception as e:
             print(f"⚠️ Replacement failed: {e}")
-            self.replacing = False
+            self.just_replaced_word = False
             self.last_underline_id = None
+        finally:
+            self.disable_scanning = False
+            self.replacing = False
 
     def on_press(self, key):
         """Handle key press events"""
@@ -1497,6 +1509,12 @@ class SmartKeyboardService:
             # Skip processing if we're in the middle of replacing
             if self.replacing:
                 return
+
+            if self.disable_scanning:
+                return
+
+            if self.just_replaced_word and key not in (Key.backspace, Key.esc):
+                self.just_replaced_word = False
 
             in_paste_cooldown = self._in_paste_cooldown()
 
@@ -1528,6 +1546,12 @@ class SmartKeyboardService:
                 
                 self.clipboard_check_active = False
             
+            if key in (Key.backspace, Key.esc) and self.just_replaced_word:
+                self.just_replaced_word = False
+                self.pending_restore = False
+                self.restore_allowed = False
+                return
+
             # Handle Esc key - hide popup or exit if pressed twice quickly
             if key == Key.esc:
                 # record time of this Esc press
