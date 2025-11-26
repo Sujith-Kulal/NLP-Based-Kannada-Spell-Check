@@ -350,63 +350,8 @@ class SmartKeyboardService:
         self.underline_vertical_offset_px = 0  # Pixels below baseline for overlay underline rendering
         self.paste_line_offsets = {
             0: 6,   # First line nudge downward slightly
-            # 1: -8,
-            # 2: -8,
-            # 3: -8,
-            # 4: -8,
-            1: -8,
-            2: -8,
-            3: -8,
-            4: -8,
-            5: -8,
-            6: -8,
-            7: -8,
-            8: -8,
-            9: -8,
-            10: -8,
-            11: -8,
-            12: -8,
-            13: -8,
-            14: -8,
-            15: -8,
-            16: -8,
-            17: -8,
-            18: -8,
-            19: -8,
-            20: -8,
-            21: -8,
-            22: -8,
-            23: -8,
-            24: -8,
-            25: -8,
-            26: -8,
-            27: -8,
-            28: -8,
-            29: -8,
-            30: -8,
-            31: -8,
-            32: -8,
-            33: -8,
-            34: -8,
-            35: -8,
-            36: -8,
-            37: -8,
-            38: -8,
-            39: -8,
-            40: -8,
-            41: -8,
-            42: -8,
-            43: -8,
-            44: -8,
-            45: -8,
-            46: -8,
-            47: -8,
-            48: -8,
-            49: -8,
-            50: -8,
-  # Second line stays tight at the current position
         }
-        self.paste_default_line_offset_px = -4  # Fallback shift for any additional lines
+        self.paste_default_line_offset_px = -8  # Fallback shift for any additional lines
 
         print("\n✅ Smart Keyboard Service initialized!")
         print("\n📝 Controls:")
@@ -792,6 +737,61 @@ class SmartKeyboardService:
     def move_caret_right(self, steps: int):
         self._move_caret(Key.right, steps)
 
+    def _compute_typed_word_overlay(self, word: str, geometry: dict) -> Optional[dict]:
+        """Return precise overlay geometry for a typed word using live layout data."""
+        if not word:
+            return None
+
+        text_hwnd = geometry.get('text_hwnd') or geometry.get('hwnd')
+        selection_start = geometry.get('selection_start')
+        if not text_hwnd or selection_start is None:
+            return None
+
+        full_text = self.get_document_text()
+        if not full_text:
+            return None
+
+        cursor_index = min(selection_start, len(full_text))
+
+        # Back up past any delimiters (space, newline, etc.) to reach the word end.
+        word_end = cursor_index
+        while word_end > 0 and self.is_word_delimiter(full_text[word_end - 1]):
+            word_end -= 1
+
+        word_start = word_end - len(word)
+        if word_start < 0 or full_text[word_start:word_end] != word:
+            candidate = full_text.rfind(word, 0, word_end)
+            if candidate == -1:
+                return None
+            word_start = candidate
+            word_end = word_start + len(word)
+
+        spans = list(re.finditer(r'[^\s\n\r\t.,!?;:]+', word))
+        if not spans:
+            return None
+
+        typed_geometry = geometry.copy()
+        typed_geometry['selection_start'] = word_start
+
+        layout_map = self._build_notepad_layout(word, spans, typed_geometry)
+        layout_info = layout_map.get(0)
+        if not layout_info:
+            return None
+
+        word_start_x = layout_info['start_x']
+        word_width = layout_info['width']
+        caret_y = layout_info['baseline_y']
+        caret_x = word_start_x + word_width
+
+        return {
+            'word_start_x': word_start_x,
+            'word_width': word_width,
+            'caret_y': caret_y,
+            'caret_x': caret_x,
+            'hwnd': geometry.get('hwnd'),
+            'window_rect': geometry.get('window_rect'),
+        }
+
     def show_no_suggestion_marker(self, word: str, has_suggestions: bool = False, suggestions: list = None):
         """Show persistent underline directly beneath the misspelled Kannada word.
         
@@ -804,38 +804,41 @@ class SmartKeyboardService:
             return
 
         try:
-            # Get current caret position (end of word)
-            caret_x, caret_y = get_caret_position()
-            
-            # Measure the actual pixel width of the Kannada word
-            hwnd = windll.user32.GetForegroundWindow()
-            word_width = measure_text_width(word, hwnd)
+            geometry = self._capture_live_geometry()
+            overlay_info = self._compute_typed_word_overlay(word, geometry) if geometry else None
 
-            window_rect = None
-            try:
-                window_rect = win32gui.GetWindowRect(hwnd)
-            except Exception:
+            if overlay_info:
+                hwnd = overlay_info['hwnd']
+                window_rect = overlay_info['window_rect']
+                caret_x = overlay_info['caret_x']
+                caret_y = overlay_info['caret_y']
+                word_width = overlay_info['word_width']
+                word_start_x = overlay_info['word_start_x']
+            else:
+                # Fallback: approximate using caret + text metrics
+                caret_x, caret_y = get_caret_position()
+                hwnd = windll.user32.GetForegroundWindow()
+                word_width = measure_text_width(word, hwnd)
+                word_start_x = caret_x - word_width
                 window_rect = None
-            
-            # Calculate word start position (caret is at end, move back by word width)
-            word_start_x = caret_x - word_width
+                try:
+                    window_rect = win32gui.GetWindowRect(hwnd)
+                except Exception:
+                    window_rect = None
 
-            focus_width, focus_offset = self._compute_focus_span(word_width)
-            display_start_x = word_start_x + focus_offset
             relative_start = None
             relative_y = None
             if window_rect:
-                relative_start = display_start_x - window_rect[0]
+                relative_start = word_start_x - window_rect[0]
                 relative_y = (caret_y + self.underline_vertical_offset_px) - window_rect[1]
             
-            # Always use persistent overlays now
             self.add_persistent_underline(
                 word=word,
                 suggestions=suggestions or [],
                 caret_x=caret_x,
                 caret_y=caret_y,
-                word_width=focus_width,
-                word_start_x=display_start_x,
+                word_width=word_width,
+                word_start_x=word_start_x,
                 hwnd=hwnd,
                 window_rect=window_rect,
                 relative_start_x=relative_start,
@@ -993,8 +996,8 @@ class SmartKeyboardService:
                     print(f"📝 Updated document word {word_index}: '{old_word}' → '{new_word}'")
                     break
 
-    def capture_paste_anchor(self):
-        """Snapshot caret and window geometry just before a paste."""
+    def _capture_live_geometry(self) -> Optional[dict]:
+        """Collect the latest caret + window geometry snapshot."""
         try:
             anchor_x, anchor_y = get_caret_position()
         except Exception:
@@ -1047,7 +1050,7 @@ class SmartKeyboardService:
 
         line_height = self._estimate_line_height(text_hwnd or hwnd)
 
-        self.last_paste_anchor = {
+        snapshot = {
             'absolute_x': anchor_x,
             'absolute_y': anchor_y,
             'relative_x': relative_x,
@@ -1060,6 +1063,14 @@ class SmartKeyboardService:
             'selection_start': selection_start,
             'timestamp': time.time(),
         }
+
+        return snapshot
+
+    def capture_paste_anchor(self):
+        """Snapshot caret and window geometry just before a paste."""
+        snapshot = self._capture_live_geometry()
+        if snapshot:
+            self.last_paste_anchor = snapshot
 
     def _estimate_line_height(self, hwnd: Optional[int]) -> int:
         """Best-effort line height (pixels) for the target window."""
