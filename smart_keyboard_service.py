@@ -404,8 +404,13 @@ class SmartKeyboardService:
         self.paste_default_line_offset_px = -8  # Fallback shift for any additional lines
         self.document_wipe_check_pending = False  # Prevent duplicate wipe checks
         self.processing_cancel_event = threading.Event()  # Signal to abort background processing
-        self._word_app = None  # Cached Word.Application COM object
-        self.word_error_font_color = 255  # wdColorRed for misspelled words
+        self._word_app = None  # Cached Word Application COM object
+        self.word_underline_style = 4  # wdUnderlineWavy
+        self.word_underline_colors = {
+            'suggestions': self._word_rgb(245, 124, 0),  # Orange for suggestion path
+            'no_suggestions': self._word_rgb(255, 59, 48),  # Red when no suggestion exists
+        }
+        self.word_underline_clear_color = 0  # Automatic color when clearing formatting
 
         print("\n✅ Smart Keyboard Service initialized!")
         print("\n📝 Controls:")
@@ -525,6 +530,13 @@ class SmartKeyboardService:
     def is_kannada_char(self, char):
         """Check if character is Kannada"""
         return char and '\u0C80' <= char <= '\u0CFF'
+
+    def _word_rgb(self, red: int, green: int, blue: int) -> int:
+        """Return a Word-friendly BGR integer for RGB components."""
+        red = max(0, min(255, int(red)))
+        green = max(0, min(255, int(green)))
+        blue = max(0, min(255, int(blue)))
+        return (blue << 16) | (green << 8) | red
 
     def _compute_focus_span(self, word_width: int) -> Tuple[int, int]:
         """Return (focus_width, offset_from_word_start) for centered underline."""
@@ -686,6 +698,9 @@ class SmartKeyboardService:
         window_rect: Optional[Tuple[int, int, int, int]] = None,
         relative_start_x: Optional[int] = None,
         relative_y: Optional[int] = None,
+        document_start: Optional[int] = None,
+        document_length: Optional[int] = None,
+        show_overlay: bool = True,
     ):
         """Add or update an underline entry with a stable unique ID."""
         if self.processing_cancel_event.is_set():
@@ -739,12 +754,15 @@ class SmartKeyboardService:
                     'bbox': bbox,
                     'last_rect': rect,
                     'added_at': time.time(),
+                    'doc_start': document_start,
+                    'doc_length': document_length or len(word),
+                    'overlay_created': show_overlay,
                 }
 
                 self.misspelled_words[uid] = underline_info
                 total = len(self.misspelled_words)
 
-            if self.engine_mode in {"notepad", "word"}:
+            if show_overlay and self.engine_mode in {"notepad", "word"}:
                 self.underline_overlay.add_underline(
                     word_id=uid,
                     word_x=word_start_x,
@@ -754,9 +772,6 @@ class SmartKeyboardService:
                     style=style,
                     hwnd=hwnd,
                 )
-
-            if self.engine_mode == "word":
-                self._color_recent_word_in_word(word)
 
             print(
                 f"{'🟠' if has_suggestions else '🔴'} Added persistent underline for "
@@ -782,6 +797,7 @@ class SmartKeyboardService:
         removed_any = False
         removed_count = 0
         failed = []
+        ranges_to_clear: List[Tuple[int, int]] = []
 
         with self.underline_lock:
             candidates = []
@@ -801,10 +817,21 @@ class SmartKeyboardService:
                     continue
                 removed_any = True
                 removed_count += 1
-                try:
-                    self.underline_overlay.remove_underline(candidate)
-                except Exception as exc:
-                    failed.append((candidate, str(exc)))
+                doc_start = info.get('doc_start')
+                doc_length = info.get('doc_length') or len(info.get('word') or '')
+                if doc_start is not None and doc_length:
+                    try:
+                        doc_length_int = int(doc_length)
+                        if doc_length_int > 0:
+                            ranges_to_clear.append((int(doc_start), doc_length_int))
+                    except Exception:
+                        pass
+
+                if info.get('overlay_created', True):
+                    try:
+                        self.underline_overlay.remove_underline(candidate)
+                    except Exception as exc:
+                        failed.append((candidate, str(exc)))
 
         if removed_any:
             remaining = len(self.misspelled_words)
@@ -816,10 +843,17 @@ class SmartKeyboardService:
             for candidate, reason in failed:
                 print(f"⚠️ Failed to remove overlay underline {candidate}: {reason}")
 
+        for start_value, length_value in ranges_to_clear:
+            self._clear_word_range(start_value, length_value)
+
         return removed_any
 
     def _clear_all_underlines(self):
         """Remove every tracked underline from overlay and cache."""
+        with self.underline_lock:
+            cached_entries = list(self.misspelled_words.values())
+            self.misspelled_words.clear()
+
         def _clear():
             try:
                 self.underline_overlay.clear_all_underlines()
@@ -828,8 +862,17 @@ class SmartKeyboardService:
                 print(f"⚠️ Error clearing overlay underlines: {exc}")
 
         self._run_on_ui_thread(_clear)
-        with self.underline_lock:
-            self.misspelled_words.clear()
+        for info in cached_entries:
+            doc_start = info.get('doc_start')
+            doc_length = info.get('doc_length') or len(info.get('word') or '')
+            if doc_start is None or not doc_length:
+                continue
+            try:
+                doc_length_int = int(doc_length)
+                if doc_length_int > 0:
+                    self._clear_word_range(int(doc_start), doc_length_int)
+            except Exception:
+                continue
         self.last_underline_id = None
 
     def _schedule_document_wipe_check(self, delay: float = 0.15):
@@ -1058,7 +1101,7 @@ class SmartKeyboardService:
             if window_rect:
                 relative_start = word_start_x - window_rect[0]
                 relative_y = (caret_y + self.underline_vertical_offset_px) - window_rect[1]
-            
+
             underline_id = self.add_persistent_underline(
                 word=word,
                 suggestions=suggestions or [],
@@ -1069,8 +1112,16 @@ class SmartKeyboardService:
                 hwnd=hwnd,
                 window_rect=window_rect,
                 relative_start_x=relative_start,
-                relative_y=relative_y
+                relative_y=relative_y,
             )
+
+            if self.engine_mode == "word":
+                doc_start = self._underline_recent_word_in_word(
+                    word,
+                    has_suggestions=has_suggestions
+                )
+                if underline_id and doc_start is not None:
+                    self._update_word_doc_position(underline_id, doc_start, len(word))
             return underline_id
             
         except Exception as exc:
@@ -1540,28 +1591,64 @@ class SmartKeyboardService:
         return occurrence_map
 
     def _get_word_application(self):
-        """Return the active Word.Application COM object if available."""
+        """Return the active Word Application COM object if available."""
         if not win32:
             return None
-
         if self._word_app is not None:
             return self._word_app
-
         try:
             app = win32.GetActiveObject("Word.Application")
         except Exception as exc:
-            print(f"⚠️ Unable to attach to Word for font coloring: {exc}")
+            print(f"⚠️ Unable to attach to Word for underline formatting: {exc}")
             return None
-
         self._word_app = app
         return app
 
-    def _color_word_range(self, start: int, end: int):
-        """Apply the error font color to the specified character range in Word."""
-        if not win32 or start is None or end is None:
+    def _apply_word_underline_style(self, font, *, has_suggestions: bool, had_error: bool):
+        """Apply the appropriate underline style/color onto a Word font object."""
+        if not font:
             return
-        if start < 0 or end <= start:
+        if not had_error:
+            try:
+                font.Underline = 0  # wdUnderlineNone
+            except Exception:
+                pass
+            try:
+                font.UnderlineColor = self.word_underline_clear_color
+            except Exception:
+                pass
             return
+
+        color_key = 'suggestions' if has_suggestions else 'no_suggestions'
+        color_value = self.word_underline_colors.get(color_key, self.word_underline_colors['no_suggestions'])
+
+        try:
+            font.Underline = self.word_underline_style
+        except Exception:
+            pass
+        try:
+            font.UnderlineColor = color_value
+        except Exception:
+            pass
+
+    def _underline_word_range(
+        self,
+        start: Optional[int],
+        length: Optional[int],
+        *,
+        has_suggestions: bool,
+        had_error: bool,
+    ) -> Optional[int]:
+        """Update underline formatting for an absolute Word range."""
+        if not win32 or start is None or length is None:
+            return None
+        try:
+            start_value = int(start)
+            length_value = int(length)
+        except Exception:
+            return None
+        if length_value <= 0:
+            return None
 
         needs_uninit = False
         try:
@@ -1573,22 +1660,32 @@ class SmartKeyboardService:
         try:
             app = self._get_word_application()
             if not app:
-                return
-
+                return None
             try:
                 doc = app.ActiveDocument
             except Exception:
                 doc = None
             if not doc:
                 self._word_app = None
-                return
+                return None
 
+            end_value = start_value + length_value
             try:
-                rng = doc.Range(Start=int(start), End=int(end))
-                rng.Font.Color = self.word_error_font_color
+                rng = doc.Range(Start=start_value, End=end_value)
             except Exception as exc:
-                print(f"⚠️ Failed to color Word range ({start}, {end}): {exc}")
-                self._word_app = None
+                print(f"⚠️ Unable to build Word range {start_value}-{end_value}: {exc}")
+                return None
+
+            self._apply_word_underline_style(
+                rng.Font,
+                has_suggestions=has_suggestions,
+                had_error=had_error
+            )
+            return start_value
+        except Exception as exc:
+            print(f"⚠️ Failed to update Word underline for range ({start_value}, {start_value + length_value}): {exc}")
+            self._word_app = None
+            return None
         finally:
             if needs_uninit:
                 try:
@@ -1596,10 +1693,19 @@ class SmartKeyboardService:
                 except Exception:
                     pass
 
-    def _color_recent_word_in_word(self, word: str):
-        """Color the most recently typed misspelled word in Word."""
-        if not word or not win32:
-            return
+    def _clear_word_range(self, start: Optional[int], length: Optional[int]):
+        """Remove custom underline styling for a stored Word range."""
+        self._underline_word_range(
+            start,
+            length,
+            has_suggestions=False,
+            had_error=False
+        )
+
+    def _underline_recent_word_in_word(self, word: str, has_suggestions: bool) -> Optional[int]:
+        """Underline the most recently typed misspelled word via Word COM APIs."""
+        if not win32 or not word:
+            return None
 
         needs_uninit = False
         try:
@@ -1611,14 +1717,11 @@ class SmartKeyboardService:
         try:
             app = self._get_word_application()
             if not app:
-                return
+                return None
 
-            try:
-                selection = app.Selection
-            except Exception:
-                selection = None
+            selection = getattr(app, "Selection", None)
             if not selection:
-                return
+                return None
 
             try:
                 doc = selection.Document
@@ -1629,20 +1732,33 @@ class SmartKeyboardService:
                     doc = None
             if not doc:
                 self._word_app = None
-                return
+                return None
 
             try:
-                end = int(selection.Start)
+                selection_end = int(selection.Start)
             except Exception:
-                return
+                return None
 
-            start = max(0, end - len(word))
+            length = len(word)
+            start = max(0, selection_end - length)
+            end = start + length
+
             try:
-                rng = doc.Range(Start=start, End=start + len(word))
-                rng.Font.Color = self.word_error_font_color
+                rng = doc.Range(Start=start, End=end)
             except Exception as exc:
-                print(f"⚠️ Failed to color current Word selection: {exc}")
-                self._word_app = None
+                print(f"⚠️ Unable to retrieve Word range for recent word: {exc}")
+                return None
+
+            self._apply_word_underline_style(
+                rng.Font,
+                has_suggestions=has_suggestions,
+                had_error=True
+            )
+            return start
+        except Exception as exc:
+            print(f"⚠️ Failed to underline recent Word selection: {exc}")
+            self._word_app = None
+            return None
         finally:
             if needs_uninit:
                 try:
@@ -1650,11 +1766,17 @@ class SmartKeyboardService:
                 except Exception:
                     pass
 
-    def _color_word_in_word(self, start: Optional[int], word: str):
-        """Color a misspelled word at the specified offset within Word."""
-        if start is None or not word:
+    def _update_word_doc_position(self, underline_id: Optional[str], doc_start: Optional[int], word_length: int):
+        """Record the Word document range associated with a stored underline entry."""
+        if not underline_id or doc_start is None:
             return
-        self._color_word_range(int(start), int(start) + len(word))
+        if word_length <= 0:
+            return
+        with self.underline_lock:
+            info = self.misspelled_words.get(underline_id)
+            if info:
+                info['doc_start'] = doc_start
+                info['doc_length'] = word_length
 
     def process_pasted_text_for_underlines(self, full_text: str):
         """One-shot paste pass that measures every word from the window edge."""
@@ -1774,6 +1896,8 @@ class SmartKeyboardService:
 
                     occurrence_map = self._build_word_occurrence_map(doc_text)
 
+                    overlay_suppressed = False
+
                     for match in spans:
                         if self.processing_cancel_event.is_set():
                             print("⛔ Paste processing cancelled mid-run")
@@ -1785,12 +1909,14 @@ class SmartKeyboardService:
                         if not any(self.is_kannada_char(c) for c in word):
                             continue
 
+                        word_len = len(word)
                         abs_start = paste_start + match.start()
                         occurrence_index = occurrence_map.get(abs_start, 0)
 
                         suggestions, had_error = self.get_suggestions(word)
                         if not had_error:
                             continue
+                        has_suggestions = len(suggestions) > 0
 
                         bbox = self.caret_tracker.get_word_bounding_box_uia(
                             target_hwnd,
@@ -1829,12 +1955,24 @@ class SmartKeyboardService:
                             window_rect=window_rect,
                             relative_start_x=relative_start,
                             relative_y=relative_y,
+                            document_start=abs_start,
+                            document_length=word_len,
+                            show_overlay=False,
+                        )
+
+                        if not overlay_suppressed:
+                            print("ℹ️ Skipping Word paste overlay – using Word COM underline formatting instead")
+                            overlay_suppressed = True
+
+                        self._underline_word_range(
+                            abs_start,
+                            word_len,
+                            has_suggestions=has_suggestions,
+                            had_error=True,
                         )
 
                         if suggestions:
                             last_popup_data = (word, suggestions, underline_id)
-
-                        self._color_word_in_word(abs_start, word)
 
                 else:
                     print("ℹ️ Paste underline skipped for unsupported mode")
