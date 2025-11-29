@@ -30,15 +30,17 @@ Usage:
     overlay.show()
 """
 
+import os
 import sys
 import time
 import threading
 import tkinter as tk
 from ctypes import wintypes, windll, byref, Structure, c_long, c_ulong, sizeof, c_int, POINTER, c_void_p
-from typing import List, Optional, Tuple, Dict
+from typing import List, Optional, Tuple, Dict, Callable
 import win32gui
 import win32con
 import win32api
+import win32process
 
 # UI Automation for pixel-perfect text positioning (like Grammarly)
 try:
@@ -49,6 +51,9 @@ try:
 except ImportError:
     UI_AUTOMATION_AVAILABLE = False
     print("⚠️ UI Automation not available. Install comtypes: pip install comtypes")
+
+# Process access flag for limited information queries
+PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 
 # ---------------------------------------------------------------------------
 # Win32 API Structures for Caret and Window Tracking
@@ -318,79 +323,148 @@ class CaretTracker:
             # Fallback: Kannada characters are typically wider
             return len(text) * 14
     
-    def get_word_bounding_box_uia(self, hwnd: int, word: str) -> Optional[Tuple[int, int, int, int]]:
-        """
-        ✅ FIX 3: Use UI Automation TextPattern2 to get pixel-perfect word bounding box.
-        This is EXACTLY how Grammarly works - it uses UI Automation API.
-        
-        Returns:
-            Tuple[left, top, right, bottom]: Screen coordinates of word bounding box
-        """
-        if not self._uia or not UI_AUTOMATION_AVAILABLE:
+    def get_word_bounding_box_uia(
+        self,
+        hwnd: int,
+        word: str,
+        occurrence: int = 0,
+        scope: str = "visible"
+    ) -> Optional[Tuple[int, int, int, int]]:
+        """Return pixel-perfect bounding box for a word via UI Automation."""
+        if not self._uia or not UI_AUTOMATION_AVAILABLE or not word:
             return None
-        
+
         try:
-            # Get UI Automation element for the window
             element = self._uia.ElementFromHandle(hwnd)
             if not element:
                 return None
-            
-            # Get TextPattern2 (supports GetBoundingRectangles)
+
             text_pattern = element.GetCurrentPattern(UIA.UIA_TextPattern2Id)
             if not text_pattern:
-                # Fallback to TextPattern
                 text_pattern = element.GetCurrentPattern(UIA.UIA_TextPatternId)
-            
             if not text_pattern:
                 return None
-            
-            # Get visible text range
-            visible_range = text_pattern.GetVisibleRanges()
-            if not visible_range or visible_range.Length == 0:
+
+            search_ranges: List = []
+
+            if scope == "document":
+                try:
+                    doc_range = text_pattern.DocumentRange
+                    if doc_range is not None:
+                        search_ranges.append(doc_range)
+                except Exception:
+                    pass
+
+            if not search_ranges:
+                try:
+                    visible_ranges = text_pattern.GetVisibleRanges()
+                    if visible_ranges and visible_ranges.Length > 0:
+                        for i in range(visible_ranges.Length):
+                            try:
+                                search_ranges.append(visible_ranges.GetElement(i))
+                            except Exception:
+                                continue
+                except Exception:
+                    search_ranges = []
+
+            if not search_ranges:
+                try:
+                    doc_range = text_pattern.DocumentRange
+                    if doc_range is not None:
+                        search_ranges.append(doc_range)
+                except Exception:
+                    pass
+
+            if not search_ranges:
                 return None
-            
-            # Search for the word in the text
-            text_range = visible_range.GetElement(0)
-            found_range = text_range.FindText(word, False, False)
-            
-            if not found_range:
-                return None
-            
-            # ✅ THIS IS THE KEY: GetBoundingRectangles() gives pixel-perfect coordinates
-            bounding_rects = found_range.GetBoundingRectangles()
-            
-            if bounding_rects and len(bounding_rects) >= 4:
-                # Extract first bounding rectangle
-                left = int(bounding_rects[0])
-                top = int(bounding_rects[1])
-                width = int(bounding_rects[2])
-                height = int(bounding_rects[3])
-                
-                return (left, top, left + width, top + height)
-        
-        except Exception as e:
-            print(f"⚠️ UI Automation error: {e}")
-        
-        return None
+
+            target_index = max(0, occurrence)
+            current_index = 0
+
+            for base_range in search_ranges:
+                try:
+                    search_range = base_range.Clone()
+                except Exception:
+                    search_range = base_range
+
+                safety_counter = 0
+                while search_range and safety_counter < 5000:
+                    safety_counter += 1
+                    try:
+                        found_range = search_range.FindText(word, False, False)
+                    except Exception:
+                        found_range = None
+
+                    if not found_range:
+                        break
+
+                    if current_index == target_index:
+                        try:
+                            rects = found_range.GetBoundingRectangles()
+                        except Exception:
+                            rects = None
+
+                        if rects and len(rects) >= 4:
+                            try:
+                                xs = rects[0::4]
+                                ys = rects[1::4]
+                                ws = rects[2::4]
+                                hs = rects[3::4]
+                                left = int(min(xs))
+                                top = int(min(ys))
+                                right = int(max(x + w for x, w in zip(xs, ws)))
+                                bottom = int(max(y + h for y, h in zip(ys, hs)))
+                                return (left, top, right, bottom)
+                            except Exception:
+                                left = int(rects[0])
+                                top = int(rects[1])
+                                width = int(rects[2])
+                                height = int(rects[3])
+                                return (left, top, left + width, top + height)
+                        return None
+
+                    current_index += 1
+
+                    try:
+                        search_range.MoveEndpointByRange(
+                            UIA.TextPatternRangeEndpoint_Start,
+                            found_range,
+                            UIA.TextPatternRangeEndpoint_End
+                        )
+                    except Exception:
+                        break
+
+                    try:
+                        probe = search_range.GetText(1)
+                    except Exception:
+                        probe = None
+                    if probe is None or len(probe) == 0:
+                        try:
+                            search_range.Move(UIA.TextUnit_Character, 1)
+                        except Exception:
+                            break
+
+            return None
+
+        except Exception as exc:
+            print(f"⚠️ UI Automation error: {exc}")
+            return None
 
     def get_text_via_ui_automation(self, hwnd: Optional[int] = None) -> Optional[str]:
-        """
-        Get full visible text from a target window without simulating keystrokes.
-        Uses UI Automation TextPattern so we never have to type Ctrl+A / Ctrl+C.
-        """
+        """Return full visible text from target window via UI Automation."""
         if not self._uia or not UI_AUTOMATION_AVAILABLE:
             return None
-        
+
         try:
             if not hwnd:
                 hwnd = windll.user32.GetForegroundWindow()
             if not hwnd:
                 return None
-            
+
             element = self._uia.ElementFromHandle(hwnd)
             if not element:
                 return None
-            
+
             text_pattern = None
             for pattern_id in (UIA.UIA_TextPattern2Id, UIA.UIA_TextPatternId):
                 try:
@@ -399,16 +473,16 @@ class CaretTracker:
                     text_pattern = None
                 if text_pattern:
                     break
-            
+
             if not text_pattern:
                 return None
-            
+
             text_range = None
             try:
                 text_range = text_pattern.DocumentRange
             except Exception:
                 text_range = None
-            
+
             if not text_range:
                 try:
                     visible_ranges = text_pattern.GetVisibleRanges()
@@ -416,18 +490,143 @@ class CaretTracker:
                         text_range = visible_ranges.GetElement(0)
                 except Exception:
                     text_range = None
-            
+
             if not text_range:
                 return None
-            
+
             text = text_range.GetText(-1)
             if text is not None:
                 return text
-        
-        except Exception as e:
-            print(f"⚠️ UI Automation text fetch error: {e}")
-        
+
+        except Exception as exc:
+            print(f"⚠️ UI Automation text fetch error: {exc}")
+
         return None
+
+    def start(self):
+        """Begin monitoring in the background."""
+        if self._running.is_set():
+            return
+        self._running.set()
+        self._thread = threading.Thread(target=self._monitor_loop, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        """Stop monitoring and join the background thread."""
+        if not self._running.is_set():
+            return
+        self._running.clear()
+        if self._thread:
+            self._thread.join(timeout=1.0)
+            self._thread = None
+
+    def _monitor_loop(self):
+        while self._running.is_set():
+            try:
+                hwnd = windll.user32.GetForegroundWindow()
+                if hwnd:
+                    process_name, window_title = self._get_process_details(hwnd)
+                    if hwnd != self._current_hwnd or process_name != self._current_process:
+                        self._current_hwnd = hwnd
+                        self._current_process = process_name
+                        self._current_title = window_title
+                        self._emit_foreground_change(hwnd, process_name, window_title)
+                    self._check_for_paste(hwnd, process_name, window_title)
+            except Exception as exc:
+                print(f"⚠️ Monitor error: {exc}")
+            time.sleep(self.poll_interval)
+
+    def _get_process_details(self, hwnd: int) -> Tuple[Optional[str], str]:
+        title = ""
+        try:
+            title = win32gui.GetWindowText(hwnd) or ""
+        except Exception:
+            title = ""
+
+        try:
+            _, pid = win32process.GetWindowThreadProcessId(hwnd)
+        except Exception:
+            return (None, title)
+
+        exe_name = self._resolve_process_name(pid)
+        return (exe_name, title)
+
+    def _resolve_process_name(self, pid: int) -> Optional[str]:
+        access_attempts = [
+            win32con.PROCESS_QUERY_INFORMATION | win32con.PROCESS_VM_READ,
+            PROCESS_QUERY_LIMITED_INFORMATION
+        ]
+        for access in access_attempts:
+            try:
+                handle = win32api.OpenProcess(access, False, pid)
+            except Exception:
+                handle = None
+            if not handle:
+                continue
+            try:
+                exe_path = win32process.GetModuleFileNameEx(handle, 0)
+                if exe_path:
+                    return os.path.basename(exe_path)
+            except Exception:
+                pass
+            finally:
+                try:
+                    win32api.CloseHandle(handle)
+                except Exception:
+                    pass
+        return None
+
+    def _check_for_paste(self, hwnd: int, process_name: Optional[str], window_title: str):
+        ctrl_down = win32api.GetAsyncKeyState(win32con.VK_CONTROL) & 0x8000
+        v_down = win32api.GetAsyncKeyState(ord('V')) & 0x8000
+        combo_active = bool(ctrl_down and v_down)
+        if combo_active and not self._ctrl_v_active:
+            self._emit_paste(hwnd, process_name, window_title, "CTRL+V")
+        self._ctrl_v_active = combo_active
+
+        shift_down = win32api.GetAsyncKeyState(win32con.VK_SHIFT) & 0x8000
+        insert_down = win32api.GetAsyncKeyState(win32con.VK_INSERT) & 0x8000
+        shift_insert_active = bool(shift_down and insert_down)
+        if shift_insert_active and not self._shift_insert_active:
+            self._emit_paste(hwnd, process_name, window_title, "SHIFT+INSERT")
+        self._shift_insert_active = shift_insert_active
+
+    def _emit_foreground_change(self, hwnd: int, process_name: Optional[str], window_title: str):
+        label = self._label_for_process(process_name, window_title)
+        if self.log_events:
+            message = f"🪟 Active window: {label}"
+            if window_title and window_title.strip():
+                message += f" — {window_title.strip()}"
+            print(message)
+        if self.on_foreground_change:
+            try:
+                self.on_foreground_change(label, process_name, window_title, hwnd)
+            except Exception as exc:
+                print(f"⚠️ Foreground callback error: {exc}")
+
+    def _emit_paste(self, hwnd: int, process_name: Optional[str], window_title: str, method: str):
+        now = time.monotonic()
+        if now - self._last_paste_ts < self.paste_cooldown:
+            return
+        self._last_paste_ts = now
+        label = self._label_for_process(process_name, window_title)
+        if self.log_events:
+            print(f"📋 Paste detected in {label} via {method}")
+        if self.on_paste:
+            try:
+                self.on_paste(label, process_name, window_title, hwnd, method)
+            except Exception as exc:
+                print(f"⚠️ Paste callback error: {exc}")
+
+    def _label_for_process(self, process_name: Optional[str], window_title: str) -> str:
+        if process_name:
+            lookup = self._process_labels.get(process_name.lower())
+            if lookup:
+                return lookup
+            return process_name
+        if window_title and window_title.strip():
+            return window_title.strip()
+        return "Unknown"
 
 
 # ---------------------------------------------------------------------------
@@ -752,6 +951,176 @@ class UnderlineOverlayWindow:
 
 
 # ---------------------------------------------------------------------------
+# Active Application & Paste Monitoring
+# ---------------------------------------------------------------------------
+
+class ApplicationActivityMonitor:
+    """Track foreground window changes and paste shortcuts across applications."""
+
+    def __init__(
+        self,
+        on_foreground_change: Optional[Callable[[str, Optional[str], str, int], None]] = None,
+        on_paste: Optional[Callable[[str, Optional[str], str, int, str], None]] = None,
+        poll_interval: float = 0.05,
+        paste_cooldown: float = 0.4,
+        log_events: bool = True
+    ):
+        self.on_foreground_change = on_foreground_change
+        self.on_paste = on_paste
+        self.poll_interval = poll_interval
+        self.paste_cooldown = paste_cooldown
+        self.log_events = log_events
+        self._running = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+        self._current_hwnd: Optional[int] = None
+        self._current_process: Optional[str] = None
+        self._current_title: str = ""
+        self._ctrl_v_active = False
+        self._shift_insert_active = False
+        self._last_paste_ts = 0.0
+        self._process_labels = {
+            'notepad.exe': 'Notepad',
+            'winword.exe': 'Microsoft Word'
+        }
+
+    def start(self):
+        if self._running.is_set():
+            return
+        self._running.set()
+        self._thread = threading.Thread(target=self._monitor_loop, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        if not self._running.is_set():
+            return
+        self._running.clear()
+        if self._thread:
+            self._thread.join(timeout=1.0)
+            self._thread = None
+
+    def _monitor_loop(self):
+        while self._running.is_set():
+            try:
+                hwnd = windll.user32.GetForegroundWindow()
+                if hwnd:
+                    process_name, window_title = self._get_process_details(hwnd)
+                    if hwnd != self._current_hwnd or process_name != self._current_process:
+                        self._current_hwnd = hwnd
+                        self._current_process = process_name
+                        self._current_title = window_title
+                        self._emit_foreground_change(hwnd, process_name, window_title)
+                    self._check_for_paste(hwnd, process_name, window_title)
+            except Exception as exc:
+                print(f"⚠️ Monitor error: {exc}")
+            time.sleep(self.poll_interval)
+
+    def _get_process_details(self, hwnd: int) -> Tuple[Optional[str], str]:
+        title = ""
+        try:
+            title = win32gui.GetWindowText(hwnd) or ""
+        except Exception:
+            title = ""
+
+        try:
+            _, pid = win32process.GetWindowThreadProcessId(hwnd)
+        except Exception:
+            return (None, title)
+
+        exe_name = self._resolve_process_name(pid)
+        return (exe_name, title)
+
+    def _resolve_process_name(self, pid: int) -> Optional[str]:
+        access_levels = [
+            win32con.PROCESS_QUERY_INFORMATION | win32con.PROCESS_VM_READ,
+            PROCESS_QUERY_LIMITED_INFORMATION
+        ]
+
+        for access in access_levels:
+            handle = None
+            try:
+                handle = win32api.OpenProcess(access, False, pid)
+            except Exception:
+                handle = None
+            if not handle:
+                continue
+            try:
+                exe_path = win32process.GetModuleFileNameEx(handle, 0)
+                if exe_path:
+                    return os.path.basename(exe_path)
+            except Exception:
+                pass
+            finally:
+                try:
+                    win32api.CloseHandle(handle)
+                except Exception:
+                    pass
+        return None
+
+    def _check_for_paste(self, hwnd: int, process_name: Optional[str], window_title: str):
+        ctrl_down = win32api.GetAsyncKeyState(win32con.VK_CONTROL) & 0x8000
+        v_down = win32api.GetAsyncKeyState(ord('V')) & 0x8000
+        combo_active = bool(ctrl_down and v_down)
+        if combo_active and not self._ctrl_v_active:
+            self._emit_paste(hwnd, process_name, window_title, "CTRL+V")
+        self._ctrl_v_active = combo_active
+
+        shift_down = win32api.GetAsyncKeyState(win32con.VK_SHIFT) & 0x8000
+        insert_down = win32api.GetAsyncKeyState(win32con.VK_INSERT) & 0x8000
+        shift_insert_active = bool(shift_down and insert_down)
+        if shift_insert_active and not self._shift_insert_active:
+            self._emit_paste(hwnd, process_name, window_title, "SHIFT+INSERT")
+        self._shift_insert_active = shift_insert_active
+
+    def _emit_foreground_change(
+        self,
+        hwnd: int,
+        process_name: Optional[str],
+        window_title: str
+    ):
+        label = self._label_for_process(process_name, window_title)
+        if self.log_events:
+            message = f"🪟 Active window: {label}"
+            if window_title and window_title.strip():
+                message += f" — {window_title.strip()}"
+            print(message)
+        if self.on_foreground_change:
+            try:
+                self.on_foreground_change(label, process_name, window_title, hwnd)
+            except Exception as exc:
+                print(f"⚠️ Foreground callback error: {exc}")
+
+    def _emit_paste(
+        self,
+        hwnd: int,
+        process_name: Optional[str],
+        window_title: str,
+        method: str
+    ):
+        now = time.monotonic()
+        if now - self._last_paste_ts < self.paste_cooldown:
+            return
+        self._last_paste_ts = now
+        label = self._label_for_process(process_name, window_title)
+        if self.log_events:
+            print(f"📋 Paste detected in {label} via {method}")
+        if self.on_paste:
+            try:
+                self.on_paste(label, process_name, window_title, hwnd, method)
+            except Exception as exc:
+                print(f"⚠️ Paste callback error: {exc}")
+
+    def _label_for_process(self, process_name: Optional[str], window_title: str) -> str:
+        if process_name:
+            label = self._process_labels.get(process_name.lower())
+            if label:
+                return label
+            return process_name
+        if window_title and window_title.strip():
+            return window_title.strip()
+        return "Unknown"
+
+
+# ---------------------------------------------------------------------------
 # Word Position Calculator (For Underline Placement)
 # ---------------------------------------------------------------------------
 
@@ -835,6 +1204,10 @@ def demo_fake_underline_system():
     # Create overlay system
     overlay = UnderlineOverlayWindow(root)
     overlay.show()
+
+    # Monitor active app and paste activity
+    activity_monitor = ApplicationActivityMonitor()
+    activity_monitor.start()
     
     # Simulate adding underlines as user types
     # In real usage, this would be triggered by spell checker
@@ -874,6 +1247,8 @@ def demo_fake_underline_system():
     
     except KeyboardInterrupt:
         print("\n🛑 Demo stopped")
+    finally:
+        activity_monitor.stop()
         overlay.destroy()
         root.destroy()
 
