@@ -1,0 +1,161 @@
+AkeVyannu AkeV(PN6)+yannu_#_ACC 
+
+AkeVyiMxa AkeV(PN6)+yiMxa_#_INS
+
+AkeVyigeV AkeV(PN6)+yigeV_#_DAT
+
+AkeVyiMxa AkeV(PN6)+yiMxa_#_ABL
+
+AkeVya AkeV(PN6)+ya_#_GEN
+
+AkeVyalli AkeV(PN6)+yalli_#_LOC
+
+AkeVgoskara AkeV(PN6)+goskara_#_BEN
+
+AkeVgoskara AkeV(PN6)+goskara_#_PUR
+
+AkeVgAgi AkeV(PN6)+gAgi_#_BEN
+
+AkeVgAgi AkeV(PN6)+gAgi_#_PUR
+
+AkeVgosuga AkeV(PN6)+gosuga_#_BEN
+
+AkeVgosuga AkeV(PN6)+gosuga_#_PUR
+
+AkeVgiMwa AkeV(PN6)+giMwa_#_COMP
+
+AkeVyaMweV AkeV(PN6)+yaMweV_#_SIM
+
+AkeVyaMwa AkeV(PN6)+yaMwa_#_SIM
+
+AkeVyaMwaha AkeV(PN6)+yaMwaha_#_SIM
+
+AkeVyoVdaneV AkeV(PN6)+yoVdaneV_#_SOC
+
+AkeVyoVMxigeV AkeV(PN6)+yoVMxigeV_#_SOC
+AkeVyA AkeV(PN6)+yu_#_NOM+yA_yu_INTR
+AkeVyU AkeV(PN6)+yu_#_NOM+yU_yu_INCL
+AkeVyo AkeV(PN6)+yu_#_NOM+yo_yu_DUB
+AkeVyo AkeV(PN6)+yu_#_NOM+yo_yu_INDF
+AkeVyo AkeV(PN6)+yu_#_NOM+yo_yu_PRES
+AkeVye AkeV(PN6)+yu_#_NOM+ye_yu_IMPH
+AkeVye AkeV(PN6)+yu_#_NOM+ye_yu_DECL
+AkeVye AkeV(PN6)+yu_#_NOM+ye_yu_RIS
+AkeVyannA AkeV(PN6)+yannu_#_ACC+nnA_nnu_INTR
+AkeVyannU AkeV(PN6)+yannu_#_ACC+nnU_nnu_INCL
+AkeVyanno AkeV(PN6)+yannu_#_ACC+nno_nnu_DUB
+AkeVyanno AkeV(PN6)+yannu_#_ACC+nno_nnu_INDF
+AkeVyanno AkeV(PN6)+yannu_#_ACC+nno_nnu_PRES
+AkeVyanne AkeV(PN6)+yannu_#_ACC+nne_nnu_IMPH
+AkeVyanne AkeV(PN6)+yannu_#_ACC+nne_nnu_DECL
+AkeVyanne AkeV(PN6)+yannu_#_ACC+nne_nnu_RIS
+AkeVyiMxalA AkeV(PN6)+yiMxa_#_INS+lA_#_INTR
+AkeVyiMxalU AkeV(PN6)+yiMxa_#_INS+lU_#_INCL
+AkeVyiMxalo AkeV(PN6)+yiMxa_#_INS+lo_#_DUB
+AkeVyiMxalo AkeV(PN6)+yiMxa_#_INS+lo_#_INDF
+AkeVyiMxalo AkeV(PN6)+yiMxa_#_INS+lo_#_PRES
+AkeVyiMxale AkeV(PN6)+yiMxa_#_INS+le_#_IMP
+AkeVyiMxale AkeV(PN6)+yiMxa_#_INS+le_#_DECL
+AkeVyiMxale AkeV(PN6)+yiMxa_#_INS+le_#_RIS
+AkeVgA AkeV(PN6)+geV_#_DAT+gA_geV_INTR
+AkeVgU AkeV(PN6)+geV_#_DAT+gU_geV_INCL
+AkeVgo AkeV(PN6)+geV_#_DAT+go_geV_DUB
+AkeVgo AkeV(PN6)+geV_#_DAT+go_geV_INDF
+AkeVgo AkeV(PN6)+geV_#_DAT+go_geV_PRES
+AkeVge AkeV(PN6)+geV_#_DAT+ge_geV_IMPH
+AkeVge AkeV(PN6)+geV_#_DAT+ge_geV_DECL
+AkeVge AkeV(PN6)+geV_#_DAT+ge_geV_RIS
+AkeVyiMxalA AkeV(PN6)+yiMxa_#_ABL+lA_#_INTR
+AkeVyiMxalU AkeV(PN6)+yiMxa_#_ABL+lU_#_INCL
+AkeVyiMxalo AkeV(PN6)+yiMxa_#_ABL+lo_#_DUB
+AkeVyiMxalo AkeV(PN6)+yiMxa_#_ABL+lo_#_INDF
+AkeVyiMxalo AkeV(PN6)+yiMxa_#_ABL+lo_#_PRES
+AkeVyiMxale AkeV(PN6)+yiMxa_#_ABL+le_#_IMPH
+AkeVyiMxale AkeV(PN6)+yiMxa_#_ABL+le_#_DECL
+AkeVyiMxale AkeV(PN6)+yiMxa_#_ABL+le_#_RIS
+AkeVyalliyA AkeV(PN6)+yalli_#_LOC+yA_#_INTR
+AkeVyalliyU AkeV(PN6)+yalli_#_LOC+yU_#_INCL
+AkeVyalliyo AkeV(PN6)+yalli_#_LOC+yo_#_DUB
+AkeVyalliyo AkeV(PN6)+yalli_#_LOC+yo_#_INDF
+AkeVyalliyo AkeV(PN6)+yalli_#_LOC+yo_#_PRES
+AkeVyalliye AkeV(PN6)+yalli_#_LOC+ye_#_IMPH
+AkeVyalliye AkeV(PN6)+yalli_#_LOC+ye_#_DECL
+AkeVyalliye AkeV(PN6)+yalli_#_LOC+ye_#_RIS
+AkeVgoskaravA AkeV(PN6)+goskara_#_BEN+vA_#_INTR
+AkeVgoskaravU AkeV(PN6)+goskara_#_BEN+vU_#_INCL
+AkeVgoskaravo AkeV(PN6)+goskara_#_BEN+vo_#_DUB
+AkeVgoskaravo AkeV(PN6)+goskara_#_BEN+vo_#_PRES
+AkeVgoskarave AkeV(PN6)+goskara_#_BEN+ve_#_IMPH
+AkeVgoskarave AkeV(PN6)+goskara_#_BEN+ve_#_DECL
+AkeVgoskarave AkeV(PN6)+goskara_#_BEN+ve_#_RIS
+AkeVgoskaravA AkeV(PN6)+goskara_#_PUR+vA_#_INTR
+AkeVgoskaravU AkeV(PN6)+goskara_#_PUR+vU_#_INCL
+AkeVgoskaravo AkeV(PN6)+goskara_#_PUR+vo_#_DUB
+AkeVgoskaravo AkeV(PN6)+goskara_#_PUR+vo_#_INDF
+AkeVgoskaravo AkeV(PN6)+goskara_#_PUR+vo_#_PRES
+AkeVgoskarave AkeV(PN6)+goskara_#_PUR+ve_#_IMPH
+AkeVgoskarave AkeV(PN6)+goskara_#_PUR+ve_#_DECL
+AkeVgoskarave AkeV(PN6)+goskara_#_PUR+ve_#_RIS
+AkeVgAgiyA AkeV(PN6)+gAgi_#_BEN+yA_#_INTR
+AkeVgAgiyU AkeV(PN6)+gAgi_#_BEN+yU_#_INC
+AkeVgAgiyo AkeV(PN6)+gAgi_#_BEN+yo_#_DUB
+AkeVgAgiyo AkeV(PN6)+gAgi_#_BEN+yo_#_PRES
+AkeVgAgiye AkeV(PN6)+gAgi_#_BEN+ye_#_IMPH
+AkeVgAgiye AkeV(PN6)+gAgi_#_BEN+ye_#_DECL
+AkeVgAgiye AkeV(PN6)+gAgi_#_BEN+ye_#_RIS
+AkeVgAgiyA AkeV(PN6)+gAgi_#_PUR+yA_#_INTR
+AkeVgAgiyU AkeV(PN6)+gAgi_#_PUR+yU_#_INCL
+AkeVgAgiyo AkeV(PN6)+gAgi_#_PUR+yo_#_DUB
+AkeVgAgiyo AkeV(PN6)+gAgi_#_PUR+yo_#_PRES
+AkeVgAgiye AkeV(PN6)+gAgi_#_PUR+ye_#_IMPH
+AkeVgAgiye AkeV(PN6)+gAgi_#_PUR+ye_#_DECL
+AkeVgAgiye AkeV(PN6)+gAgi_#_PUR+ye_#_RIS
+AkeVgosugavA AkeV(PN6)+gosuga_#_BEN+vA_#_INTR
+AkeVgosugavU AkeV(PN6)+gosuga_#_BEN+vU_#_INC
+AkeVgosugavo AkeV(PN6)+gosuga_#_BEN+vo_#_DUB
+AkeVgosugavo AkeV(PN6)+gosuga_#_BEN+vo_#_INDF
+AkeVgosugavo AkeV(PN6)+gosuga_#_BEN+vo_#_PRES
+AkeVgosugave AkeV(PN6)+gosuga_#_BEN+ve_#_IMPH
+AkeVgosugave AkeV(PN6)+gosuga_#_BEN+ve_#_DECL
+AkeVgosugave AkeV(PN6)+gosuga_#_BEN+ve_#_RIS
+AkeVgosugavA AkeV(PN6)+gosuga_#_PUR+vA_#_INTR
+AkeVgosugavU AkeV(PN6)+gosuga_#_PUR+vU_#_INCL
+AkeVgosugavo AkeV(PN6)+gosuga_#_PUR+vo_#_DUB
+AkeVgosugavo AkeV(PN6)+gosuga_#_PUR+vo_#_INDF
+AkeVgosugavo AkeV(PN6)+gosuga_#_PUR+vo_#_PRES
+AkeVgosugave AkeV(PN6)+gosuga_#_PUR+ve_#_IMPH
+AkeVgosugave AkeV(PN6)+gosuga_#_PUR+ve_#_DECL
+AkeVgosugave AkeV(PN6)+gosuga_#_PUR+ve_#_RIS
+AkeVgiMwalA AkeV(PN6)+giMwa_#_COMP+lA_#_INTR
+AkeVgiMwalU AkeV(PN6)+giMwa_#_COMP+lU_#_INCL
+AkeVgiMwalo AkeV(PN6)+giMwa_#_COMP+lo_#_DUB
+AkeVgiMwalo AkeV(PN6)+giMwa_#_COMP+lo_#_INDF
+AkeVgiMwalo AkeV(PN6)+giMwa_#_COMP+lo_#_PRES
+AkeVgiMwale AkeV(PN6)+giMwa_#_COMP+le_#_IMPH
+AkeVgiMwale AkeV(PN6)+giMwa_#_COMP+le_#_DECL
+AkeVgiMwale AkeV(PN6)+giMwa_#_COMP+le_#_RIS
+AkeVyaMweVyA AkeV(PN6)+yaMweV_#_SIM+yA_#_INTR
+AkeVyaMweVyU AkeV(PN6)+yaMweV_#_SIM+yU_#_INCL
+AkeVyaMweVyo AkeV(PN6)+yaMweV_#_SIM+yo_#_DUB
+AkeVyaMweVyo AkeV(PN6)+yaMweV_#_SIM+yo_#_INDF
+AkeVyaMweVyo AkeV(PN6)+yaMweV_#_SIM+yo_#_PRES
+AkeVyaMweVye AkeV(PN6)+yaMweV_#_SIM+ye_#_IMPH
+AkeVyaMweVye AkeV(PN6)+yaMweV_#_SIM+ye_#_DEC
+AkeVyaMweVye AkeV(PN6)+yaMweV_#_SIM+ye_#_RIS
+AkeVyoVdaneVyA AkeV(PN6)+yoVdaneV_#_SOC+yA_#_INTR
+AkeVyoVdaneVyU AkeV(PN6)+yoVdaneV_#_SOC+yU_#_INCL
+AkeVyoVdaneVyo AkeV(PN6)+yoVdaneV_#_SOC+yo_#_DUB
+AkeVyoVdaneVyo AkeV(PN6)+yoVdaneV_#_SOC+yo_#_INDF
+AkeVyoVdaneVyo AkeV(PN6)+yoVdaneV_#_SOC+yo_#_PRES
+AkeVyoVdaneVye AkeV(PN6)+yoVdaneV_#_SOC+ye_#_IMPH
+AkeVyoVdaneVye AkeV(PN6)+yoVdaneV_#_SOC+ye_#_DECL
+AkeVyoVdaneVye AkeV(PN6)+yoVdaneV_#_SOC+ye_#_RIS
+AkeVyoVMxigeVyA AkeV(PN6)+yoVMxigeV_#_SOC+yA_#_INTR
+AkeVyoVMxigeVyU AkeV(PN6)+yoVMxigeV_#_SOC+yU_#_INCL
+AkeVyoVMxigeVyo AkeV(PN6)+yoVMxigeV_#_SOC+yo_#_DUB
+AkeVyoVMxigeVyo AkeV(PN6)+yoVMxigeV_#_SOC+yo_#_INDF
+AkeVyoVMxigeVyo AkeV(PN6)+yoVMxigeV_#_SOC+yo_#_PRES
+AkeVyoVMxigeVye AkeV(PN6)+yoVMxigeV_#_SOC+ye_#_IMPH
+AkeVyoVMxigeVye AkeV(PN6)+yoVMxigeV_#_SOC+ye_#_DECL
+AkeVyoVMxigeVye AkeV(PN6)+yoVMxigeV_#_SOC+ye_#_RIS
+

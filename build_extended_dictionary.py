@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 
 """
-Extract words from Excel files and add to spell checker dictionary
-This will help improve spell checking by including all paradigm forms
+Extract words from a single consolidated Excel file (all.xlsx)
+Simplified version without POS tagging - all words treated equally
 """
 
 import sys
@@ -11,13 +11,13 @@ import os
 from openpyxl import load_workbook
 import pickle
 
-def extract_words_from_excel(filepath, pos_type):
-    """Extract all words from an Excel paradigm file"""
+def extract_words_from_excel(filepath):
+    """Extract all words from the consolidated Excel file"""
     print(f"\n{'='*70}")
     print(f"📊 Processing: {os.path.basename(filepath)}")
     print(f"{'='*70}\n")
     
-    words = {}
+    words = set()  # Using set for unique words
     
     try:
         wb = load_workbook(filepath, data_only=True)
@@ -45,7 +45,7 @@ def extract_words_from_excel(filepath, pos_type):
                         word = value.split()[0].split('(')[0].strip()
                         
                         if word and len(word) > 1:
-                            words[word] = words.get(word, 0) + 1
+                            words.add(word)
                             word_count += 1
             
             # Progress indicator
@@ -62,39 +62,28 @@ def extract_words_from_excel(filepath, pos_type):
         
     except Exception as e:
         print(f"   ❌ Error: {e}")
-        return {}
+        import traceback
+        traceback.print_exc()
+        return set()
 
 def main():
     check_pos_dir = r"d:\NLP-Based-Kannada-Spell-Correction-System\check_pos"
     
-    # Excel files
-    excel_files = [
-        ("Noun Distribution.xlsx", "NN"),
-        ("Verb Distribution.xlsx", "VB"),
-        ("Pronoun Distribution .xlsx", "PR")
-    ]
+    # Single consolidated Excel file
+    excel_file = "all.xlsx"
+    filepath = os.path.join(check_pos_dir, excel_file)
     
     print("\n" + "="*70)
-    print("📚 BUILDING EXTENDED DICTIONARY FROM EXCEL FILES")
+    print("📚 BUILDING EXTENDED DICTIONARY FROM CONSOLIDATED EXCEL FILE")
     print("="*70)
     
-    all_words = {
-        'NN': {},
-        'VB': {},
-        'PR': {}
-    }
+    if not os.path.exists(filepath):
+        print(f"\n❌ ERROR: File not found: {filepath}")
+        print("Please ensure 'all.xlsx' exists in the check_pos folder")
+        return
     
-    total_words = 0
-    
-    for filename, pos_type in excel_files:
-        filepath = os.path.join(check_pos_dir, filename)
-        
-        if os.path.exists(filepath):
-            words = extract_words_from_excel(filepath, pos_type)
-            all_words[pos_type] = words
-            total_words += len(words)
-        else:
-            print(f"\n⚠️  File not found: {filename}")
+    # Extract all words (no POS categorization)
+    all_words = extract_words_from_excel(filepath)
     
     # Save to pickle file
     output_file = "extended_dictionary.pkl"
@@ -108,32 +97,24 @@ def main():
         pickle.dump(all_words, f)
     
     print(f"   ✅ Saved to: {output_file}")
-    print(f"   ✅ Total unique words: {total_words}")
-    print(f"      • Nouns: {len(all_words['NN'])}")
-    print(f"      • Verbs: {len(all_words['VB'])}")
-    print(f"      • Pronouns: {len(all_words['PR'])}")
+    print(f"   ✅ Total unique words: {len(all_words)}")
     
     # Test if specific words are included
     print(f"\n{'='*70}")
     print("🔍 CHECKING FOR SPECIFIC WORDS")
     print(f"{'='*70}\n")
     
-    test_words = [
-        ('avaralli', 'PR'),
-        ('ivaralli', 'PR'),
-        ('ivaru', 'PR')
-    ]
+    test_words = ['avaralli', 'ivaralli', 'ivaru', 'kannada', 'bareyalu']
     
-    for word, pos in test_words:
-        if word in all_words[pos]:
-            print(f"   ✅ '{word}' found in {pos} dictionary")
+    for word in test_words:
+        if word in all_words:
+            print(f"   ✅ '{word}' found in dictionary")
         else:
-            print(f"   ❌ '{word}' NOT found in {pos} dictionary")
+            print(f"   ❌ '{word}' NOT found in dictionary")
     
     print(f"\n{'='*70}")
     print("✅ DONE - Dictionary file created!")
     print(f"{'='*70}\n")
-    print("Next step: Update enhanced_spell_checker.py to use this dictionary")
 
 if __name__ == "__main__":
     main()

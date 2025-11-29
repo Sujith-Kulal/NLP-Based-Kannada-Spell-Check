@@ -1,0 +1,281 @@
+avanannu avanu(PN1)+nannu_nu_ACC 
+
+avaniMxa avanu(PN1)+niMxa_nu_INS
+
+avanigeV avanu(PN1)+nigeV_nu_DAT
+
+avaniMxa avanu(PN1)+niMxa_nu_AB
+
+avana avanu(PN1)+na_nu_GEN
+
+avanai avanu(PN1)+nai_nu_LOC
+
+avanA avanu(PN1)+nA_nu_VOC
+
+avanigoskara avanu(PN1)+nigoskara_nu_BEN
+
+avanigoskara avanu(PN1)+nigoskara_nu_PUR
+
+avanigAgi avanu(PN1)+nigAgi_nu_BEN
+
+avanigAgi avanu(PN1)+nigAgi_nu_PUR
+
+avanigosuga avanu(PN1)+nigosuga_nu_BEN
+
+avanigosuga avanu(PN1)+nigosuga_nu_PUR
+
+avanigiMwa avanu(PN1)+nigiMwa_nu_COMP
+
+avanaMweV avanu(PN1)+naMweV_nu_SIM
+
+avanaMwa avanu(PN1)+naMwa_nu_SIM
+
+avanaMwaha avanu(PN1)+naMwaha_nu_SIM
+
+avanondaneV avanu(PN1)+nondaneV_nu_SOC
+
+avanonMxigeV avanu(PN1)+nonMxigeV_nu_SOC
+avanA avanu(PN1)+nu_nu_NOM+nA_nu_INTR
+
+avanU avanu(PN1)+nu_nu_NOM+nU_nu_INC
+
+avano avanu(PN1)+nu_nu_NOM+no_nu_DUB
+
+avano avanu(PN1)+nu_nu_NOM+no_nu_INDF
+
+avano avanu(PN1)+nu_nu_NOM+no_nu_PRES
+
+avane avanu(PN1)+nu_nu_NOM+ne_nu_IMPH
+
+avane avanu(PN1)+nu_nu_NOM+ne_nu_DEC
+
+avane avanu(PN1)+nu_nu_NOM+ne_nu_RIS
+
+avanannA avanu(PN1)+nannu_nu_ACC+nnA_nnu_INTR
+
+avanannU avanu(PN1)+nannu_nu_ACC+nnU_nnu_INC
+
+avananno avanu(PN1)+nannu_nu_ACC+nno_nnu_DUB
+
+avananno avanu(PN1)+nannu_nu_ACC+nno_nnu_INDF
+
+avananno avanu(PN1)+nannu_nu_ACC+nno_nnu_PRES
+
+avananne avanu(PN1)+nannu_nu_ACC+nne_nnu_IMPH
+
+avananne avanu(PN1)+nannu_nu_ACC+nne_nnu_DEC
+
+avananne avanu(PN1)+nannu_nu_ACC+nne_nnu_RIS
+
+avaniMxaA avanu(PN1)+niMxa_nu_INS+A_#_INTR
+
+avaniMxaU avanu(PN1)+niMxa_nu_INS+U_#_INC
+
+avaniMxao avanu(PN1)+niMxa_nu_INS+o_#_DUB
+
+avaniMxao avanu(PN1)+niMxa_nu_INS+o_#_INDF
+
+avaniMxao avanu(PN1)+niMxa_nu_INS+o_#_PRES
+
+avaniMxae avanu(PN1)+niMxa_nu_INS+e_#_IMP
+
+avaniMxae avanu(PN1)+niMxa_nu_INS+e_#_DEC
+
+avaniMxae avanu(PN1)+niMxa_nu_INS+e_#_RIS
+
+avanigA avanu(PN1)+nigeV_nu_DAT+gA_geV_INTR
+
+avanigU avanu(PN1)+nigeV_nu_DAT+gU_geV_INC
+
+avanigo avanu(PN1)+nigeV_nu_DAT+go_geV_DUB
+
+avanigo avanu(PN1)+nigeV_nu_DAT+go_geV_INDF
+
+avanigo avanu(PN1)+nigeV_nu_DAT+go_geV_PRES
+
+avanige avanu(PN1)+nigeV_nu_DAT+ge_geV_IMPH
+
+avanige avanu(PN1)+nigeV_nu_DAT+ge_geV_DEC
+
+avanige avanu(PN1)+nigeV_nu_DAT+ge_geV_RIS
+
+avaniMxaA avanu(PN1)+niMxa_nu_AB+A_#_INTR
+
+avaniMxaU avanu(PN1)+niMxa_nu_AB+U_#_INC
+
+avaniMxao avanu(PN1)+niMxa_nu_AB+o_#_DUB
+
+avaniMxao avanu(PN1)+niMxa_nu_AB+o_#_INDF
+avaniMxao avanu(PN1)+niMxa_nu_AB+o_#_PRES
+
+avaniMxae avanu(PN1)+niMxa_nu_AB+e_#_IMPH
+
+avaniMxae avanu(PN1)+niMxa_nu_AB+e_#_DEC
+
+avaniMxae avanu(PN1)+niMxa_nu_AB+e_#_RIS
+
+avanaiyA avanu(PN1)+nai_nu_OC+yA_#_INTR
+
+avanaiyU avanu(PN1)+nai_nu_OC+yU_#_INC
+
+avanaiyo avanu(PN1)+nai_nu_OC+yo_#_DUB
+
+avanaiyo avanu(PN1)+nai_nu_OC+yo_#_INDF
+
+avanaiyo avanu(PN1)+nai_nu_OC+yo_#_PRES
+
+avanaiye avanu(PN1)+nai_nu_OC+ye_#_IMPH
+
+avanaiye avanu(PN1)+nai_nu_OC+ye_#_DEC
+
+avanaiye avanu(PN1)+nai_nu_OC+ye_#_RIS
+
+avanigoskaravA avanu(PN1)+nigoskara_nu_BEN+vA_#_INTR
+
+avanigoskaravU avanu(PN1)+nigoskara_nu_BEN+vU_#_INC
+
+avanigoskaravo avanu(PN1)+nigoskara_nu_BEN+vo_#_DUB
+
+avanigoskaravo avanu(PN1)+nigoskara_nu_BEN+vo_#_PRES
+
+avanigoskarave avanu(PN1)+nigoskara_nu_BEN+ve_#_IMPH
+
+avanigoskarave avanu(PN1)+nigoskara_nu_BEN+ve_#_DEC
+
+avanigoskarave avanu(PN1)+nigoskara_nu_BEN+ve_#_RIS
+
+avanigoskaravA avanu(PN1)+nigoskara_nu_PUR+vA_#_INTR
+
+avanigoskaravU avanu(PN1)+nigoskara_nu_PUR+vU_#_INC
+
+avanigoskaravo avanu(PN1)+nigoskara_nu_PUR+vo_#_DUB
+
+avanigoskaravo avanu(PN1)+nigoskara_nu_PUR+vo_#_PRES
+
+avanigoskarave avanu(PN1)+nigoskara_nu_PUR+ve_#_IMPH
+
+avanigoskarave avanu(PN1)+nigoskara_nu_PUR+ve_#_DEC
+
+avanigoskarave avanu(PN1)+nigoskara_nu_PUR+ve_#_RIS
+
+avanigAgiyA avanu(PN1)+nigAgi_nu_BEN+yA_#_INTR
+
+avanigAgiyU avanu(PN1)+nigAgi_nu_BEN+yU_#_INC
+avanigAgiyo avanu(PN1)+nigAgi_nu_BEN+yo_#_DUB
+
+avanigAgiyo avanu(PN1)+nigAgi_nu_BEN+yo_#_PRES
+
+avanigAgiye avanu(PN1)+nigAgi_nu_BEN+ye_#_IMPH
+
+avanigAgiye avanu(PN1)+nigAgi_nu_BEN+ye_#_DEC
+
+avanigAgiye avanu(PN1)+nigAgi_nu_BEN+ye_#_RIS
+
+avanigAgiyA avanu(PN1)+nigAgi_nu_PUR+yA_#_INTR
+
+avanigAgiyU avanu(PN1)+nigAgi_nu_PUR+yU_#_INC
+
+avanigAgiyo avanu(PN1)+nigAgi_nu_PUR+yo_#_DUB
+
+avanigAgiyo avanu(PN1)+nigAgi_nu_PUR+yo_#_PRES
+
+avanigAgiye avanu(PN1)+nigAgi_nu_PUR+ye_#_IMPH
+
+avanigAgiye avanu(PN1)+nigAgi_nu_PUR+ye_#_DEC
+
+avanigAgiye avanu(PN1)+nigAgi_nu_PUR+ye_#_RIS
+
+avanigosugavA avanu(PN1)+nigosuga_nu_BEN+vA_#_INTR
+
+avanigosugavU avanu(PN1)+nigosuga_nu_BEN+vU_#_INC
+
+avanigosugavo avanu(PN1)+nigosuga_nu_BEN+vo_#_DUB
+
+avanigosugavo avanu(PN1)+nigosuga_nu_BEN+vo_#_INDF
+
+avanigosugavo avanu(PN1)+nigosuga_nu_BEN+vo_#_PRES
+
+avanigosugave avanu(PN1)+nigosuga_nu_BEN+ve_#_IMPH
+
+avanigosugave avanu(PN1)+nigosuga_nu_BEN+ve_#_DEC
+
+avanigosugave avanu(PN1)+nigosuga_nu_BEN+ve_#_RIS
+
+avanigosugavA avanu(PN1)+nigosuga_nu_PUR+vA_#_INTR
+
+avanigosugavU avanu(PN1)+nigosuga_nu_PUR+vU_#_INC
+
+avanigosugavo avanu(PN1)+nigosuga_nu_PUR+vo_#_DUB
+
+avanigosugavo avanu(PN1)+nigosuga_nu_PUR+vo_#_INDF
+
+avanigosugavo avanu(PN1)+nigosuga_nu_PUR+vo_#_PRES
+
+avanigosugave avanu(PN1)+nigosuga_nu_PUR+ve_#_IMPH
+
+avanigosugave avanu(PN1)+nigosuga_nu_PUR+ve_#_DEC
+
+avanigosugave avanu(PN1)+nigosuga_nu_PUR+ve_#_RIS
+
+avanigiMwaA avanu(PN1)+nigiMwa_nu_COMP+A_#_INTR
+
+avanigiMwaU avanu(PN1)+nigiMwa_nu_COMP+U_#_INC
+
+avanigiMwao avanu(PN1)+nigiMwa_nu_COMP+o_#_DUB
+
+avanigiMwao avanu(PN1)+nigiMwa_nu_COMP+o_#_INDF
+
+avanigiMwao avanu(PN1)+nigiMwa_nu_COMP+o_#_PRES
+
+avanigiMwae avanu(PN1)+nigiMwa_nu_COMP+e_#_IMPH
+
+avanigiMwae avanu(PN1)+nigiMwa_nu_COMP+e_#_DEC
+
+avanigiMwae avanu(PN1)+nigiMwa_nu_COMP+e_#_RIS
+
+avanaMweVyA avanu(PN1)+naMweV_nu_SIM+yA_#_INTR
+
+avanaMweVyU avanu(PN1)+naMweV_nu_SIM+yU_#_INC
+
+avanaMweVyo avanu(PN1)+naMweV_nu_SIM+yo_#_DUB
+
+avanaMweVyo avanu(PN1)+naMweV_nu_SIM+yo_#_INDF
+
+avanaMweVyo avanu(PN1)+naMweV_nu_SIM+yo_#_PRES
+
+avanaMweVye avanu(PN1)+naMweV_nu_SIM+ye_#_IMPH
+
+avanaMweVye avanu(PN1)+naMweV_nu_SIM+ye_#_DEC
+avanaMweVye avanu(PN1)+naMweV_nu_SIM+ye_#_RIS
+
+avanoVdaneVyA avanu(PN1)+noVdaneV_nu_SOC+yA_#_INTR
+
+avanoVdaneVyU avanu(PN1)+noVdaneV_nu_SOC+yU_#_INC
+
+avanoVdaneVyo avanu(PN1)+noVdaneV_nu_SOC+yo_#_DUB
+
+avanoVdaneVyo avanu(PN1)+noVdaneV_nu_SOC+yo_#_INDF
+
+avanoVdaneVyo avanu(PN1)+noVdaneV_nu_SOC+yo_#_PRES
+
+avanoVdaneVye avanu(PN1)+noVdaneV_nu_SOC+ye_#_IMPH
+
+avanoVdaneVye avanu(PN1)+noVdaneV_nu_SOC+ye_#_DEC
+avanoVdaneVye avanu(PN1)+noVdaneV_nu_SOC+ye_#_RIS
+
+avanoVMxigeVyA avanu(PN1)+noVMxigeV_nu_SOC+yA_#_INTR
+
+avanoVMxigeVyU avanu(PN1)+noVMxigeV_nu_SOC+yU_#_INC
+
+avanoVMxigeVyo avanu(PN1)+noVMxigeV_nu_SOC+yo_#_DUB
+
+avanoVMxigeVyo avanu(PN1)+noVMxigeV_nu_SOC+yo_#_INDF
+
+avanoVMxigeVyo avanu(PN1)+noVMxigeV_nu_SOC+yo_#_PRES
+
+avanoVMxigeVye avanu(PN1)+noVMxigeV_nu_SOC+ye_#_IMPH
+
+avanoVMxigeVye avanu(PN1)+noVMxigeV_nu_SOC+ye_#_DEC
+
+avanoVMxigeVye avanu(PN1)+noVMxigeV_nu_SOC+ye_#_RIS
+

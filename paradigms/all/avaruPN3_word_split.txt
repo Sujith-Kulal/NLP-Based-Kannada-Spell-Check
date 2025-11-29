@@ -1,0 +1,162 @@
+avarannu avaru(PN3)+rannu_ru_ACC 
+
+avariMxa avaru(PN3)+riMxa_ru_INS
+
+avarigeV avaru(PN3)+rigeV_ru_DAT
+
+avariMxa avaru(PN3)+riMxa_ru_ABL
+
+avara avaru(PN3)+ra_ru_GEN
+
+avaralli avaru(PN3)+ralli_ru_LOC
+
+avarA avaru(PN3)+rA_ru_VOC
+
+avarigoskara avaru(PN3)+rigoskara_ru_BEN
+
+avarigoskara avaru(PN3)+rigoskara_ru_PUR
+
+avarigAgi avaru(PN3)+rigAgi_ru_BEN
+
+avarigAgi avaru(PN3)+rigAgi_ru_PUR
+
+avarigosuga avaru(PN3)+rigosuga_ru_BEN
+
+avarigosuga avaru(PN3)+rigosuga_ru_PUR
+
+avarigiMwa avaru(PN3)+rigiMwa_ru_COMP
+
+avaraMweV avaru(PN3)+raMweV_ru_SIM
+
+avaraMwa avaru(PN3)+raMwa_ru_SIM
+
+avaraMwaha avaru(PN3)+raMwaha_ru_SIM
+
+avaroVdaneV avaru(PN3)+roVdaneV_ru_SOC
+
+avaroVMxigeV avaru(PN3)+roVMxigeV_ru_SOC
+avarA avaru(PN3)+ru_ru_NOM+rA_ru_INTR
+avarU avaru(PN3)+ru_ru_NOM+rU_ru_INCL
+avaro avaru(PN3)+ru_ru_NOM+ro_ru_DUB
+avaro avaru(PN3)+ru_ru_NOM+ro_ru_INDF
+avaro avaru(PN3)+ru_ru_NOM+ro_ru_PRES
+avare avaru(PN3)+ru_ru_NOM+re_ru_IMPH
+avare avaru(PN3)+ru_ru_NOM+re_ru_DECL
+avare avaru(PN3)+ru_ru_NOM+re_ru_RIS
+avarannA avaru(PN3)+rannu_ru_ACC+nnA_nnu_INTR
+avarannU avaru(PN3)+rannu_ru_ACC+nnU_nnu_INCL
+avaranno avaru(PN3)+rannu_ru_ACC+nno_nnu_DUB
+avaranno avaru(PN3)+rannu_ru_ACC+nno_nnu_INDF
+avaranno avaru(PN3)+rannu_ru_ACC+nno_nnu_PRES
+avaranne avaru(PN3)+rannu_ru_ACC+nne_nnu_IMPH
+avaranne avaru(PN3)+rannu_ru_ACC+nne_nnu_DECL
+avaranne avaru(PN3)+rannu_ru_ACC+nne_nnu_RIS
+avariMxalA avaru(PN3)+riMxa_ru_INS+lA_#_INTR
+avariMxalU avaru(PN3)+riMxa_ru_INS+lU_#_INCL
+avariMxalo avaru(PN3)+riMxa_ru_INS+lo_#_DUB
+avariMxalo avaru(PN3)+riMxa_ru_INS+lo_#_INDF
+avariMxalo avaru(PN3)+riMxa_ru_INS+lo_#_PRES
+avariMxale avaru(PN3)+riMxa_ru_INS+le_#_IMP
+avariMxale avaru(PN3)+riMxa_ru_INS+le_#_DECL
+avariMxale avaru(PN3)+riMxa_ru_INS+le_#_RIS
+avarigA avaru(PN3)+rigeV_ru_DAT+gA_geV_INTR
+avarigU avaru(PN3)+rigeV_ru_DAT+gU_geV_INCL
+avarigo avaru(PN3)+rigeV_ru_DAT+go_geV_DUB
+avarigo avaru(PN3)+rigeV_ru_DAT+go_geV_INDF
+avarigo avaru(PN3)+rigeV_ru_DAT+go_geV_PRES
+avarige avaru(PN3)+rigeV_ru_DAT+ge_geV_IMPH
+avarige avaru(PN3)+rigeV_ru_DAT+ge_geV_DECL
+avarige avaru(PN3)+rigeV_ru_DAT+ge_geV_RIS
+avariMxalA avaru(PN3)+riMxa_ru_ABL+lA_#_INTR
+avariMxalU avaru(PN3)+riMxa_ru_ABL+lU_#_INCL
+avariMxalo avaru(PN3)+riMxa_ru_ABL+lo_#_DUB
+avariMxalo avaru(PN3)+riMxa_ru_ABL+lo_#_INDF
+avariMxalo avaru(PN3)+riMxa_ru_ABL+lo_#_PRES
+avariMxale avaru(PN3)+riMxa_ru_ABL+le_#_IMPH
+avariMxale avaru(PN3)+riMxa_ru_ABL+le_#_DECL
+avariMxale avaru(PN3)+riMxa_ru_ABL+le_#_RIS
+avaralliyA avaru(PN3)+ralli_ru_LOC+yA_#_INTR
+avaralliyU avaru(PN3)+ralli_ru_LOC+yU_#_INCL
+avaralliyo avaru(PN3)+ralli_ru_LOC+yo_#_DUB
+avaralliyo avaru(PN3)+ralli_ru_LOC+yo_#_INDF
+avaralliyo avaru(PN3)+ralli_ru_LOC+yo_#_PRES
+avaralliye avaru(PN3)+ralli_ru_LOC+ye_#_IMPH
+avaralliye avaru(PN3)+ralli_ru_LOC+ye_#_DECL
+avaralliye avaru(PN3)+ralli_ru_LOC+ye_#_RIS
+avarigoskaravA avaru(PN3)+rigoskara_ru_BEN+vA_#_INTR
+avarigoskaravU avaru(PN3)+rigoskara_ru_BEN+vU_#_INCL
+avarigoskaravo avaru(PN3)+rigoskara_ru_BEN+vo_#_DUB
+avarigoskaravo avaru(PN3)+rigoskara_ru_BEN+vo_#_PRES
+avarigoskarave avaru(PN3)+rigoskara_ru_BEN+ve_#_IMPH
+avarigoskarave avaru(PN3)+rigoskara_ru_BEN+ve_#_DECL
+avarigoskarave avaru(PN3)+rigoskara_ru_BEN+ve_#_RIS
+avarigoskaravA avaru(PN3)+rigoskara_ru_PUR+vA_#_INTR
+avarigoskaravU avaru(PN3)+rigoskara_ru_PUR+vU_#_INCL
+avarigoskaravo avaru(PN3)+rigoskara_ru_PUR+vo_#_DUB
+avarigoskaravo avaru(PN3)+rigoskara_ru_PUR+vo_#_PRES
+avarigoskarave avaru(PN3)+rigoskara_ru_PUR+ve_#_IMPH
+avarigoskarave avaru(PN3)+rigoskara_ru_PUR+ve_#_DECL
+avarigoskarave avaru(PN3)+rigoskara_ru_PUR+ve_#_RIS
+avarigAgiyA avaru(PN3)+rigAgi_ru_BEN+yA_#_INTR
+avarigAgiyU avaru(PN3)+rigAgi_ru_BEN+yU_#_INC
+avarigAgiyo avaru(PN3)+rigAgi_ru_BEN+yo_#_DUB
+avarigAgiyo avaru(PN3)+rigAgi_ru_BEN+yo_#_PRES
+avarigAgiye avaru(PN3)+rigAgi_ru_BEN+ye_#_IMPH
+avarigAgiye avaru(PN3)+rigAgi_ru_BEN+ye_#_DECL
+avarigAgiye avaru(PN3)+rigAgi_ru_BEN+ye_#_RIS
+avarigAgiyA avaru(PN3)+rigAgi_ru_PUR+yA_#_INTR
+avarigAgiyU avaru(PN3)+rigAgi_ru_PUR+yU_#_INCL
+avarigAgiyo avaru(PN3)+rigAgi_ru_PUR+yo_#_DUB
+avarigAgiyo avaru(PN3)+rigAgi_ru_PUR+yo_#_PRES
+avarigAgiye avaru(PN3)+rigAgi_ru_PUR+ye_#_IMPH
+avarigAgiye avaru(PN3)+rigAgi_ru_PUR+ye_#_DECL
+avarigAgiye avaru(PN3)+rigAgi_ru_PUR+ye_#_RIS
+avarigosugavA avaru(PN3)+rigosuga_ru_BEN+vA_#_INTR
+avarigosugavU avaru(PN3)+rigosuga_ru_BEN+vU_#_INC
+avarigosugavo avaru(PN3)+rigosuga_ru_BEN+vo_#_DUB
+avarigosugavo avaru(PN3)+rigosuga_ru_BEN+vo_#_INDF
+avarigosugavo avaru(PN3)+rigosuga_ru_BEN+vo_#_PRES
+avarigosugave avaru(PN3)+rigosuga_ru_BEN+ve_#_IMPH
+avarigosugave avaru(PN3)+rigosuga_ru_BEN+ve_#_DECL
+avarigosugave avaru(PN3)+rigosuga_ru_BEN+ve_#_RIS
+avarigosugavA avaru(PN3)+rigosuga_ru_PUR+vA_#_INTR
+avarigosugavU avaru(PN3)+rigosuga_ru_PUR+vU_#_INCL
+avarigosugavo avaru(PN3)+rigosuga_ru_PUR+vo_#_DUB
+avarigosugavo avaru(PN3)+rigosuga_ru_PUR+vo_#_INDF
+avarigosugavo avaru(PN3)+rigosuga_ru_PUR+vo_#_PRES
+avarigosugave avaru(PN3)+rigosuga_ru_PUR+ve_#_IMPH
+avarigosugave avaru(PN3)+rigosuga_ru_PUR+ve_#_DECL
+avarigosugave avaru(PN3)+rigosuga_ru_PUR+ve_#_RIS
+avarigiMwalA avaru(PN3)+rigiMwa_ru_COMP+lA_#_INTR
+avarigiMwalU avaru(PN3)+rigiMwa_ru_COMP+lU_#_INCL
+avarigiMwalo avaru(PN3)+rigiMwa_ru_COMP+lo_#_DUB
+avarigiMwalo avaru(PN3)+rigiMwa_ru_COMP+lo_#_INDF
+avarigiMwalo avaru(PN3)+rigiMwa_ru_COMP+lo_#_PRES
+avarigiMwale avaru(PN3)+rigiMwa_ru_COMP+le_#_IMPH
+avarigiMwale avaru(PN3)+rigiMwa_ru_COMP+le_#_DECL
+avarigiMwale avaru(PN3)+rigiMwa_ru_COMP+le_#_RIS
+avaraMweVyA avaru(PN3)+raMweV_ru_SIM+yA_#_INTR
+avaraMweVyU avaru(PN3)+raMweV_ru_SIM+yU_#_INCL
+avaraMweVyo avaru(PN3)+raMweV_ru_SIM+yo_#_DUB
+avaraMweVyo avaru(PN3)+raMweV_ru_SIM+yo_#_INDF
+avaraMweVyo avaru(PN3)+raMweV_ru_SIM+yo_#_PRES
+avaraMweVye avaru(PN3)+raMweV_ru_SIM+ye_#_IMPH
+avaraMweVye avaru(PN3)+raMweV_ru_SIM+ye_#_DEC
+avaraMweVye avaru(PN3)+raMweV_ru_SIM+ye_#_RIS
+avaroVdaneVyA avaru(PN3)+roVdaneV_ru_SOC+yA_#_INTR
+avaroVdaneVyU avaru(PN3)+roVdaneV_ru_SOC+yU_#_INCL
+avaroVdaneVyo avaru(PN3)+roVdaneV_ru_SOC+yo_#_DUB
+avaroVdaneVyo avaru(PN3)+roVdaneV_ru_SOC+yo_#_INDF
+avaroVdaneVyo avaru(PN3)+roVdaneV_ru_SOC+yo_#_PRES
+avaroVdaneVye avaru(PN3)+roVdaneV_ru_SOC+ye_#_IMPH
+avaroVdaneVye avaru(PN3)+roVdaneV_ru_SOC+ye_#_DECL
+avaroVdaneVye avaru(PN3)+roVdaneV_ru_SOC+ye_#_RIS
+avaroVMxigeVyA avaru(PN3)+roVMxigeV_ru_SOC+yA_#_INTR
+avaroVMxigeVyU avaru(PN3)+roVMxigeV_ru_SOC+yU_#_INCL
+avaroVMxigeVyo avaru(PN3)+roVMxigeV_ru_SOC+yo_#_DUB
+avaroVMxigeVyo avaru(PN3)+roVMxigeV_ru_SOC+yo_#_INDF
+avaroVMxigeVyo avaru(PN3)+roVMxigeV_ru_SOC+yo_#_PRES
+avaroVMxigeVye avaru(PN3)+roVMxigeV_ru_SOC+ye_#_IMPH
+avaroVMxigeVye avaru(PN3)+roVMxigeV_ru_SOC+ye_#_DECL
+avaroVMxigeVye avaru(PN3)+roVMxigeV_ru_SOC+ye_#_RIS
+
