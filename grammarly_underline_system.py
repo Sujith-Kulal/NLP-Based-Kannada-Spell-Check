@@ -460,6 +460,9 @@ class UnderlineOverlayWindow:
         self.visible = False
         self.lock = threading.Lock()
         self._stop_sync = threading.Event()
+        self._sync_thread: Optional[threading.Thread] = None
+        self._ui_thread_id = threading.get_ident()
+        self._pending_redraw = False
         
         # Create transparent overlay window
         self.window = tk.Toplevel(self.root)
@@ -493,6 +496,34 @@ class UnderlineOverlayWindow:
         self.window.withdraw()
         
         print("✅ Grammarly-style underline overlay initialized")
+
+    def _run_on_ui_thread(self, func, *args, **kwargs):
+        """Execute Tk work on the UI thread even when called from worker threads."""
+        def invoke():
+            try:
+                func(*args, **kwargs)
+            except Exception as exc:
+                print(f"⚠️ Overlay UI task failed: {exc}")
+
+        if threading.get_ident() == self._ui_thread_id:
+            invoke()
+        else:
+            try:
+                self.root.after(0, invoke)
+            except Exception as dispatch_error:
+                print(f"⚠️ Unable to marshal overlay call: {dispatch_error}")
+
+    def _schedule_redraw(self):
+        """Coalesce redraw requests so canvas ops stay on the Tk thread."""
+        if self._pending_redraw:
+            return
+
+        def do_redraw():
+            self._pending_redraw = False
+            self._redraw_underlines()
+
+        self._pending_redraw = True
+        self._run_on_ui_thread(do_redraw)
     
     def add_underline(
         self,
@@ -527,30 +558,24 @@ class UnderlineOverlayWindow:
                 'canvas_id': None
             }
         
-        # Redraw all underlines
-        self._redraw_underlines()
+        # Redraw all underlines from the Tk thread
+        self._schedule_redraw()
     
     def remove_underline(self, word_id: str):
         """Remove a specific underline"""
         with self.lock:
             if word_id in self.underlines:
-                # Delete from canvas
-                canvas_id = self.underlines[word_id].get('canvas_id')
-                if canvas_id:
-                    try:
-                        self.canvas.delete(canvas_id)
-                    except:
-                        pass
                 del self.underlines[word_id]
         
         print(f"🗑️ Removed underline for: {word_id}")
+        self._schedule_redraw()
     
     def clear_all_underlines(self):
         """Clear all underlines from the overlay"""
         with self.lock:
-            self.canvas.delete('all')
             self.underlines.clear()
         print("🧹 Cleared all underlines")
+        self._run_on_ui_thread(lambda: self.canvas.delete('all'))
     
     def _draw_wavy_underline(self, x: int, y: int, width: int, color: str) -> int:
         """
@@ -597,12 +622,14 @@ class UnderlineOverlayWindow:
     
     def _redraw_underlines(self):
         """Redraw all underlines on the canvas"""
+        if threading.get_ident() != self._ui_thread_id:
+            self._run_on_ui_thread(self._redraw_underlines)
+            return
+
         try:
-            # Get current window position to calculate relative coordinates
             if not self.target_hwnd:
                 return
             
-            # Use instance method with DPI awareness
             if not hasattr(self, 'caret_tracker'):
                 self.caret_tracker = CaretTracker()
             
@@ -612,17 +639,17 @@ class UnderlineOverlayWindow:
             
             win_left, win_top, win_right, win_bottom = window_rect
             
-            # Clear canvas
-            self.canvas.delete('all')
+            try:
+                self.canvas.delete('all')
+            except Exception as canvas_error:
+                print(f"⚠️ Canvas clear failed: {canvas_error}")
+                return
             
-            # Redraw each underline
             with self.lock:
                 for word_id, info in list(self.underlines.items()):
-                    # Calculate position relative to overlay window
                     rel_x = info['x'] - win_left
                     rel_y = info['y'] - win_top
                     
-                    # Draw underline
                     if info['style'] == 'wavy':
                         canvas_id = self._draw_wavy_underline(
                             rel_x, rel_y, info['width'], info['color']
@@ -632,68 +659,74 @@ class UnderlineOverlayWindow:
                             rel_x, rel_y, info['width'], info['color']
                         )
                     
-                    # Store canvas ID for later removal
                     info['canvas_id'] = canvas_id
         
         except Exception as e:
             print(f"⚠️ Error redrawing underlines: {e}")
     
     def show(self, target_hwnd: Optional[int] = None):
-        """
-        Show the overlay window and start tracking the target application.
-        
-        Args:
-            target_hwnd: Window handle of the target application to overlay
-        """
-        if target_hwnd:
-            self.target_hwnd = target_hwnd
-        
-        if not self.target_hwnd:
-            # Get current foreground window
-            self.target_hwnd = windll.user32.GetForegroundWindow()
-        
-        # Position overlay over target window
-        self._reposition_overlay()
-        
-        # Show window
-        self.window.deiconify()
-        self.window.lift()
-        self.visible = True
-        
-        # Start synchronization thread
-        if not self._stop_sync.is_set():
-            threading.Thread(target=self._sync_with_target, daemon=True).start()
-        
-        print(f"👁️ Overlay visible over window: {self.target_hwnd}")
+        """Show the overlay window and start tracking the target application."""
+
+        def _do_show():
+            if target_hwnd:
+                self.target_hwnd = target_hwnd
+
+            if not self.target_hwnd:
+                self.target_hwnd = windll.user32.GetForegroundWindow()
+
+            self._reposition_overlay()
+
+            self.window.deiconify()
+            self.window.lift()
+            self.visible = True
+
+            if not self._sync_thread or not self._sync_thread.is_alive():
+                self._stop_sync.clear()
+                self._sync_thread = threading.Thread(
+                    target=self._sync_with_target,
+                    name="OverlaySyncThread",
+                    daemon=True,
+                )
+                self._sync_thread.start()
+
+            print(f"👁️ Overlay visible over window: {self.target_hwnd}")
+
+        self._run_on_ui_thread(_do_show)
     
     def hide(self):
         """Hide the overlay window"""
-        self.window.withdraw()
-        self.visible = False
-        print("🙈 Overlay hidden")
+        def _do_hide():
+            self.window.withdraw()
+            self.visible = False
+            print("🙈 Overlay hidden")
+
+        self._run_on_ui_thread(_do_hide)
     
-    def _reposition_overlay(self):
+    def _reposition_overlay(self, rect: Optional[Tuple[int, int, int, int]] = None):
         """Position the overlay window exactly over the target window with DPI awareness"""
+        if threading.get_ident() != self._ui_thread_id:
+            self._run_on_ui_thread(lambda: self._reposition_overlay(rect))
+            return
+
         try:
             if not self.target_hwnd:
                 return
             
-            # Use DPI-aware window rect
             if not hasattr(self, 'caret_tracker'):
                 self.caret_tracker = CaretTracker()
             
-            rect = self.caret_tracker.get_window_rect(self.target_hwnd)
-            if not rect:
+            target_rect = rect or self.caret_tracker.get_window_rect(self.target_hwnd)
+            if not target_rect:
                 return
             
-            left, top, right, bottom = rect
+            left, top, right, bottom = target_rect
             width = right - left
             height = bottom - top
             
-            # Position overlay
-            self.window.geometry(f"{width}x{height}+{left}+{top}")
+            if width <= 0 or height <= 0:
+                return
             
-            # Redraw underlines with new positioning
+            self.window.geometry(f"{width}x{height}+{left}+{top}")
             self._redraw_underlines()
         
         except Exception as e:
@@ -715,7 +748,7 @@ class UnderlineOverlayWindow:
                 # Check if target window still exists
                 if not win32gui.IsWindow(self.target_hwnd):
                     print("⚠️ Target window closed, hiding overlay")
-                    self.hide()
+                    self._run_on_ui_thread(self.hide)
                     break
                 
                 # Check if target window moved or resized (DPI-aware)
@@ -724,30 +757,30 @@ class UnderlineOverlayWindow:
                 
                 rect = self.caret_tracker.get_window_rect(self.target_hwnd)
                 if rect and rect != last_rect:
-                    self._reposition_overlay()
+                    self._run_on_ui_thread(lambda r=rect: self._reposition_overlay(r))
                     last_rect = rect
-                
-                # Check if target window is no longer foreground
-                fg_hwnd = windll.user32.GetForegroundWindow()
-                if fg_hwnd != self.target_hwnd:
-                    # Target lost focus - could hide overlay or keep it visible
-                    # For now, keep visible for demonstration
-                    pass
                 
                 time.sleep(0.05)  # Update 20 times per second
             
             except Exception as e:
-                print(f"⚠️ Sync error: {e}")
-                time.sleep(0.5)
+                print(f"❌ Overlay sync error (ignored): {e}")
+                time.sleep(0.1)
+                continue
     
     def destroy(self):
         """Clean up and destroy the overlay window"""
         self._stop_sync.set()
+        if self._sync_thread and self._sync_thread.is_alive():
+            self._sync_thread.join(timeout=0.5)
         self.clear_all_underlines()
-        try:
-            self.window.destroy()
-        except:
-            pass
+
+        def _do_destroy():
+            try:
+                self.window.destroy()
+            except Exception as exc:
+                print(f"⚠️ Error destroying overlay window: {exc}")
+
+        self._run_on_ui_thread(_do_destroy)
         print("💥 Overlay destroyed")
 
 
