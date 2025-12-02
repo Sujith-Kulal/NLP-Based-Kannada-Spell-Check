@@ -42,6 +42,7 @@ class NotepadOverlay:
         self.last_clipboard = ""
         self.errors = []
         self.running = True
+        self.current_interface = None
         
         print("\n✅ Spell checker loaded!")
         print("\n📝 How to use:")
@@ -55,6 +56,7 @@ class NotepadOverlay:
         print("="*70 + "\n")
         
         self.setup_hotkey()
+        self._start_interface_monitor()
     
     def setup_hotkey(self):
         """Setup Ctrl+Shift+C hotkey to check spelling"""
@@ -142,6 +144,55 @@ class NotepadOverlay:
         except Exception as e:
             print(f"⚠️  Error: {e}")
     
+    def _start_interface_monitor(self):
+        """Start a background thread that reports the active interface."""
+        self._interface_monitor = threading.Thread(
+            target=self._monitor_active_window,
+            daemon=True,
+        )
+        self._interface_monitor.start()
+
+    def _monitor_active_window(self):
+        """Detect foreground window switches and log interface changes."""
+        last_interface = None
+        while self.running:
+            try:
+                hwnd = win32gui.GetForegroundWindow()
+                if not hwnd:
+                    time.sleep(0.5)
+                    continue
+
+                class_name = win32gui.GetClassName(hwnd)
+                title = win32gui.GetWindowText(hwnd)
+                interface = self._classify_interface(class_name, title)
+
+                if interface != last_interface:
+                    last_interface = interface
+                    self.current_interface = interface
+                    if interface:
+                        print(f"🪟 Active interface detected: {interface}", flush=True)
+            except Exception as exc:
+                print(f"⚠️  Interface detection error: {exc}")
+                time.sleep(1.5)
+            else:
+                time.sleep(0.5)
+
+    def _classify_interface(self, class_name, title):
+        """Return a readable name for the active window based on class/title."""
+        title_lower = (title or "").lower()
+        class_lower = (class_name or "").lower()
+
+        if "notepad" in title_lower or class_lower == "notepad":
+            return "Notepad"
+
+        if "word" in title_lower or class_lower == "opusapp":
+            return "Microsoft Word"
+
+        if title:
+            return title
+
+        return class_name
+
     def _show_text_with_markers(self, text, errors):
         """Show text with visual markers for errors"""
         print("📝 Your text with error markers:\n")

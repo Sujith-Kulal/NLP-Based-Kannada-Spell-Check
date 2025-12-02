@@ -365,6 +365,10 @@ class SmartKeyboardService:
         print("\n🚀 Service running... Type or paste Kannada text in any app to see suggestions!")
         print("="*70 + "\n")
         print("💡 TIP: Press Esc twice quickly to stop the service cleanly")
+
+        # Track the active interface (Notepad, Word, etc.)
+        self.current_interface = None
+        self._interface_monitor = None
     
     def reset_current_word(self, preserve_delimiter=False, clear_marker=True):
         """Clear the tracked word buffer and reset caret index"""
@@ -510,6 +514,57 @@ class SmartKeyboardService:
                 removed_any = True
 
         return removed_any
+
+    def _start_interface_monitor(self):
+        """Start monitoring the foreground window so we can log interface changes."""
+        if self._interface_monitor and self._interface_monitor.is_alive():
+            return
+        self._interface_monitor = threading.Thread(
+            target=self._monitor_active_window,
+            daemon=True,
+        )
+        self._interface_monitor.start()
+
+    def _monitor_active_window(self):
+        """Detect foreground window switches and announce the active interface."""
+        last_interface = None
+        while self.running:
+            try:
+                hwnd = win32gui.GetForegroundWindow()
+                if not hwnd:
+                    time.sleep(0.5)
+                    continue
+
+                class_name = win32gui.GetClassName(hwnd)
+                title = win32gui.GetWindowText(hwnd)
+                interface = self._classify_interface(class_name, title)
+
+                if interface != last_interface:
+                    last_interface = interface
+                    self.current_interface = interface
+                    if interface:
+                        print(f"🪟 Active interface detected: {interface}", flush=True)
+            except Exception as exc:
+                print(f"⚠️ Interface detection error: {exc}")
+                time.sleep(1.5)
+            else:
+                time.sleep(0.5)
+
+    def _classify_interface(self, class_name: str, title: str) -> Optional[str]:
+        """Return a friendly name for the current window."""
+        title_lower = (title or "").lower()
+        class_lower = (class_name or "").lower()
+
+        if "notepad" in title_lower or class_lower == "notepad":
+            return "Notepad"
+
+        if "word" in title_lower or class_lower == "opusapp":
+            return "Microsoft Word"
+
+        if title:
+            return title
+
+        return class_name
 
     def type_delimiter_key(self, delimiter):
         """Re-type the delimiter that triggered the suggestion"""
@@ -1888,6 +1943,7 @@ class SmartKeyboardService:
     def run(self):
         """Start the keyboard monitoring service"""
         self.running = True
+        self._start_interface_monitor()
         
         def on_activate_toggle():
             self.toggle_enabled()
@@ -1942,6 +1998,7 @@ class SmartKeyboardService:
         except Exception as e:
             print(f"\n⚠️ Service stopped: {e}")
         finally:
+            self.running = False
             # Clean up all persistent underlines
             self.cleanup_all_underlines()
             if listener.running:
