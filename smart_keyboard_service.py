@@ -29,6 +29,7 @@ import time
 import uuid
 import threading
 import tkinter as tk
+import ctypes
 from ctypes import wintypes, windll, byref, Structure, c_long, c_ulong, c_short, pointer, POINTER, sizeof, create_unicode_buffer
 from win32api import GetCursorPos
 import signal
@@ -37,6 +38,20 @@ import re
 import win32gui
 import win32con
 from typing import List, Optional, Tuple, Dict
+
+from dpi_utils import DPIScaler
+
+
+try:
+    ctypes.windll.shcore.SetProcessDpiAwareness(2)
+except AttributeError:
+    try:
+        ctypes.windll.user32.SetProcessDPIAware()
+    except Exception:
+        pass
+except OSError:
+    # DPI awareness already configured; ignore.
+    pass
 
 
 # ---------------------------------------------------------------------------
@@ -167,7 +182,15 @@ except ImportError:
 # ---------------------------------------------------------------------------
 class SuggestionPopup:
     """Floating popup that shows Kannada word suggestions"""
-    def __init__(self, on_selection_callback=None, on_close_callback=None):
+
+    def __init__(
+        self,
+        on_selection_callback=None,
+        on_close_callback=None,
+        *,
+        caret_tracker=None,
+        dpi_scaler: Optional[DPIScaler] = None,
+    ):
         self.root = tk.Tk()
         self.root.overrideredirect(True)
         self.root.attributes('-topmost', True)
@@ -177,6 +200,8 @@ class SuggestionPopup:
         self.visible = False
         self.on_selection_callback = on_selection_callback
         self.on_close_callback = on_close_callback
+        self.caret_tracker = caret_tracker
+        self.dpi_scaler = dpi_scaler
 
         # Handle window close
         self.root.protocol("WM_DELETE_WINDOW", self._on_window_close)
@@ -210,10 +235,23 @@ class SuggestionPopup:
         self.listbox.activate(0)
         
         # Get caret position (where text is being typed) instead of mouse cursor
-        x, y = get_caret_position()
+        caret_x = caret_y = None
+        if self.caret_tracker:
+            raw_rect = self.caret_tracker.get_caret_rect()
+            scale = self.dpi_scaler.scale if self.dpi_scaler else 1.0
+            rect = self.caret_tracker.get_scaled_rect(raw_rect, scale)
+            if rect:
+                caret_x = rect['left']
+                caret_y = rect['top'] + rect['height']
+
+        if caret_x is None or caret_y is None:
+            caret_x, caret_y = get_caret_position()
+        
+        offset_x = self.dpi_scaler.px(10) if self.dpi_scaler else 10
+        offset_y = self.dpi_scaler.px(5) if self.dpi_scaler else 5
         
         # Position popup slightly below and to the right of the caret
-        self.root.geometry(f"+{x+10}+{y+5}")
+        self.root.geometry(f"+{caret_x + offset_x}+{caret_y + offset_y}")
         self.root.deiconify()
         self.visible = True
         self.root.lift()
@@ -289,19 +327,24 @@ class SmartKeyboardService:
         
         self.spell_checker = EnhancedSpellChecker()
         self.keyboard_controller = Controller()
+        self.dpi = DPIScaler()
+        self.caret_tracker = CaretTracker()  # Now with font metrics, DPI, and UI Automation
         self.popup = SuggestionPopup(
             on_selection_callback=self.replace_word,
-            on_close_callback=self.on_popup_close
+            on_close_callback=self.on_popup_close,
+            caret_tracker=self.caret_tracker,
+            dpi_scaler=self.dpi,
         )
         
         # Initialize Grammarly-style fake underline overlay with DPI + Font + UIA support
-        self.underline_overlay = UnderlineOverlayWindow(self.popup.root)
-        self.caret_tracker = CaretTracker()  # Now with font metrics, DPI, and UI Automation
+        self.underline_overlay = UnderlineOverlayWindow(self.popup.root, dpi_scaler=self.dpi)
         self.word_position_calc = WordPositionCalculator(self.caret_tracker)
         
         # Underline styling + relocation controls
         self.underline_focus_ratio = 0.45  # portion of the word width to underline (centered)
-        self.underline_focus_min_px = 28
+        self.underline_focus_min_px = self.dpi.px(28)
+        self.underline_thickness_px = max(1, self.dpi.px(1.2))
+        self.underline_offset_px = self.dpi.px(2)
         self.underline_lock = threading.Lock()
 
         # Track all misspelled words with persistent underlines (keyed by unique underline id)
@@ -342,18 +385,18 @@ class SmartKeyboardService:
         self.last_delimiter_char = ' '  # Track the delimiter that triggered suggestion
         self.restore_allowed = False  # Allow one restore after trailing delimiters
         self.last_paste_anchor = None  # Snapshot of caret/window state before paste
-        self.default_text_margin_px = 18
-        self.default_baseline_offset_px = 32
-        self.default_line_height_px = 28
+        self.default_text_margin_px = self.dpi.px(18)
+        self.default_baseline_offset_px = self.dpi.px(32)
+        self.default_line_height_px = max(self.dpi.px(28), 16)
         self.paste_cooldown_until = 0.0  # Timestamp until per-key checks resume after paste
-        self.layout_horizontal_padding_px = 12  # Safety padding when simulating client width
+        self.layout_horizontal_padding_px = self.dpi.px(12)  # Safety padding when simulating client width
         self.layout_tab_stop_spaces = 4  # Approximate tab stop spacing (Notepad default = 8, but Kannada wider)
-        self.layout_min_char_px = 6  # Guard for zero-width glyphs during layout
-        self.underline_vertical_offset_px = 0  # Pixels below baseline for overlay underline rendering
+        self.layout_min_char_px = max(1, self.dpi.px(6))  # Guard for zero-width glyphs during layout
         self.paste_line_offsets = {
-            0: 6,   # First line nudge downward slightly
+            0: self.dpi.px(-6),  # Lift first line slightly for tighter alignment
         }
-        self.paste_default_line_offset_px = -8  # Fallback shift for any additional lines
+        self.paste_default_line_offset_px = self.dpi.px(-22)  # Fallback shift for any additional lines
+        self.paste_line_offset_increment_px = self.dpi.px(4)  # Push lower lines down a touch
 
         print("\n✅ Smart Keyboard Service initialized!")
         print("\n📝 Controls:")
@@ -566,6 +609,34 @@ class SmartKeyboardService:
 
         return class_name
 
+    def _get_caret_height(self, hwnd: Optional[int]) -> Optional[int]:
+        """Best-effort caret height for dynamic underline placement."""
+        if not hwnd:
+            return None
+        try:
+            rect = self.caret_tracker.get_caret_rect(hwnd)
+            if rect:
+                height = int(round(rect.get('height', 0)))
+                return max(height, 1) if height else None
+        except Exception:
+            return None
+        return None
+
+    def _compute_underline_offset(self, caret_height: Optional[int]) -> int:
+        """Return underline offset based on caret height and DPI fallback."""
+        if caret_height and caret_height > 0:
+            dynamic = int(round(caret_height * 0.15))
+            return max(self.underline_offset_px, dynamic)
+        return self.underline_offset_px
+
+    def _compute_underline_padding(self, caret_height: Optional[int]) -> int:
+        """Return bounding box padding scaled to caret height."""
+        base_padding = self.dpi.px(8)
+        if caret_height and caret_height > 0:
+            dynamic = int(round(caret_height * 0.4))
+            return max(base_padding, dynamic)
+        return base_padding
+
     def type_delimiter_key(self, delimiter):
         """Re-type the delimiter that triggered the suggestion"""
         if not delimiter:
@@ -595,6 +666,7 @@ class SmartKeyboardService:
         window_rect: Optional[Tuple[int, int, int, int]] = None,
         relative_start_x: Optional[int] = None,
         relative_y: Optional[int] = None,
+        caret_height: Optional[int] = None,
     ):
         """Add or update an underline entry with a stable unique ID."""
         try:
@@ -605,7 +677,9 @@ class SmartKeyboardService:
             if not self.underline_overlay.visible:
                 self.underline_overlay.show(hwnd)
 
-            underline_y = caret_y + self.underline_vertical_offset_px
+            height = caret_height if caret_height and caret_height > 0 else self._get_caret_height(hwnd)
+            underline_offset = self._compute_underline_offset(height)
+            underline_y = caret_y + underline_offset
 
             rect = window_rect
             if hwnd and rect is None:
@@ -622,11 +696,12 @@ class SmartKeyboardService:
                 if rel_y is None:
                     rel_y = underline_y - rect[1]
 
+            underline_padding = self._compute_underline_padding(height)
             bbox = {
                 'left': word_start_x,
-                'top': underline_y - 14,
+                'top': underline_y - underline_padding,
                 'right': word_start_x + word_width,
-                'bottom': underline_y + 14,
+                'bottom': underline_y + underline_padding,
             }
 
             with self.underline_lock:
@@ -646,6 +721,7 @@ class SmartKeyboardService:
                     'bbox': bbox,
                     'last_rect': rect,
                     'added_at': time.time(),
+                    'caret_height': height,
                 }
 
                 self.misspelled_words[uid] = underline_info
@@ -867,20 +943,58 @@ class SmartKeyboardService:
             geometry = self._capture_live_geometry()
             overlay_info = self._compute_typed_word_overlay(word, geometry) if geometry else None
 
+            caret_x = None
+            caret_y = None
+            word_width = None
+            word_start_x = None
+            window_rect = None
+            hwnd = None
+
             if overlay_info:
-                hwnd = overlay_info['hwnd']
-                window_rect = overlay_info['window_rect']
-                caret_x = overlay_info['caret_x']
-                caret_y = overlay_info['caret_y']
-                word_width = overlay_info['word_width']
-                word_start_x = overlay_info['word_start_x']
-            else:
-                # Fallback: approximate using caret + text metrics
+                hwnd = overlay_info.get('hwnd')
+                window_rect = overlay_info.get('window_rect')
+                caret_x = overlay_info.get('caret_x')
+                caret_y = overlay_info.get('caret_y')
+                word_width = overlay_info.get('word_width')
+                word_start_x = overlay_info.get('word_start_x')
+
+            if not hwnd or not win32gui.IsWindow(hwnd):
+                try:
+                    hwnd = windll.user32.GetForegroundWindow()
+                except Exception:
+                    hwnd = None
+
+            caret_rect_raw = self.caret_tracker.get_caret_rect(hwnd) if self.caret_tracker else None
+            caret_rect = self.caret_tracker.get_scaled_rect(caret_rect_raw, self.dpi.scale) if caret_rect_raw else None
+            caret_height = None
+
+            if caret_rect:
+                caret_width = max(caret_rect['width'], 1)
+                caret_height = max(caret_rect['height'], 1)
+                caret_x = caret_rect['left'] + caret_width
+                caret_y = caret_rect['top'] + caret_height
+
+            if word_width is None:
+                if hwnd:
+                    try:
+                        word_width = self.caret_tracker.measure_text_width(word, hwnd)
+                    except Exception:
+                        word_width = measure_text_width(word, hwnd)
+                else:
+                    word_width = measure_text_width(word, hwnd)
+
+            if caret_x is None or caret_y is None:
                 caret_x, caret_y = get_caret_position()
-                hwnd = windll.user32.GetForegroundWindow()
-                word_width = measure_text_width(word, hwnd)
-                word_start_x = caret_x - word_width
-                window_rect = None
+                if caret_height is None:
+                    caret_height = self._get_caret_height(hwnd)
+
+            if caret_height is None:
+                caret_height = self._get_caret_height(hwnd)
+
+            if word_start_x is None:
+                word_start_x = caret_x - (word_width or 0)
+
+            if window_rect is None and hwnd:
                 try:
                     window_rect = win32gui.GetWindowRect(hwnd)
                 except Exception:
@@ -890,7 +1004,8 @@ class SmartKeyboardService:
             relative_y = None
             if window_rect:
                 relative_start = word_start_x - window_rect[0]
-                relative_y = (caret_y + self.underline_vertical_offset_px) - window_rect[1]
+                underline_offset = self._compute_underline_offset(caret_height)
+                relative_y = (caret_y + underline_offset) - window_rect[1]
             
             underline_id = self.add_persistent_underline(
                 word=word,
@@ -902,7 +1017,8 @@ class SmartKeyboardService:
                 hwnd=hwnd,
                 window_rect=window_rect,
                 relative_start_x=relative_start,
-                relative_y=relative_y
+                relative_y=relative_y,
+                caret_height=caret_height,
             )
             return underline_id
             
@@ -1233,6 +1349,8 @@ class SmartKeyboardService:
         origin_y = 0
         ascent = None
         line_height = geometry.get('line_height', self.default_line_height_px)
+        last_line_y: Optional[int] = None
+        current_line = -1
 
         try:
             origin_x, origin_y = win32gui.ClientToScreen(text_hwnd, (0, 0))
@@ -1304,14 +1422,38 @@ class SmartKeyboardService:
                     baseline_offset = line_height
 
                 if line_height > 0:
-                    line_number = max(0, int(start_y / line_height))
+                    if last_line_y is None:
+                        current_line = 0
+                        last_line_y = start_y
+                    else:
+                        threshold = max(1, int(line_height * 0.6))
+                        if abs(start_y - last_line_y) > threshold:
+                            current_line += 1
+                            last_line_y = start_y
+                        else:
+                            # Track the smallest Y so wrapped lines stay anchored.
+                            if start_y < last_line_y:
+                                last_line_y = start_y
+                    line_number = max(current_line, 0)
                 else:
                     line_number = 0
 
-                line_offset = self.paste_line_offsets.get(
+                base_line_offset = self.paste_line_offsets.get(
                     line_number,
                     self.paste_default_line_offset_px,
                 )
+
+                if line_height and self.default_line_height_px:
+                    line_scale = max(0.2, min(2.5, line_height / float(self.default_line_height_px)))
+                    line_offset = int(round(base_line_offset * line_scale))
+                else:
+                    line_offset = base_line_offset
+
+                if line_number > 0 and self.paste_line_offset_increment_px:
+                    increment = self.paste_line_offset_increment_px
+                    if line_height and self.default_line_height_px:
+                        increment = int(round(increment * line_scale))
+                    line_offset += increment
 
                 baseline_y = screen_start_y + baseline_offset + line_offset
 
@@ -1371,6 +1513,8 @@ class SmartKeyboardService:
                     print("⚠️ Unable to rebuild Notepad layout; skipping paste underlines.")
                     return
                 last_popup_data: Optional[Tuple[str, List[str]]] = None
+                caret_height = self._get_caret_height(target_hwnd)
+                underline_offset = self._compute_underline_offset(caret_height)
 
                 for idx, match in enumerate(spans):
                     layout_info = layout_map.get(idx)
@@ -1396,7 +1540,7 @@ class SmartKeyboardService:
                     relative_y = None
                     if window_rect:
                         relative_start = word_start_x - window_rect[0]
-                        relative_y = (caret_y + self.underline_vertical_offset_px) - window_rect[1]
+                        relative_y = (caret_y + underline_offset) - window_rect[1]
 
                     underline_id = self.add_persistent_underline(
                         word=word,
@@ -1409,6 +1553,7 @@ class SmartKeyboardService:
                         window_rect=window_rect,
                         relative_start_x=relative_start,
                         relative_y=relative_y,
+                        caret_height=caret_height,
                     )
 
                     if suggestions:

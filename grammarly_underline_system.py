@@ -40,6 +40,8 @@ import win32gui
 import win32con
 import win32api
 
+from dpi_utils import DPIScaler
+
 # UI Automation for pixel-perfect text positioning (like Grammarly)
 try:
     from comtypes import client
@@ -166,17 +168,92 @@ class CaretTracker:
             caret_rect = gui_info.rcCaret
             point = POINT(caret_rect.left, caret_rect.bottom)
             windll.user32.ClientToScreen(caret_hwnd, byref(point))
-            
-            # ✅ FIX 2: Apply DPI scaling
-            dpi_scale = self.get_dpi_scale_factor(hwnd)
-            point.x = int(point.x * dpi_scale)
-            point.y = int(point.y * dpi_scale)
-            
             return (point.x, point.y, hwnd)
         
         except Exception as e:
             print(f"⚠️ Caret tracking error: {e}")
             return (0, 0, None)
+
+    def get_caret_rect(self, hwnd: Optional[int] = None) -> Optional[dict]:
+        """Return the bounding rectangle for the caret using UI Automation or Win32 fallback."""
+        try:
+            if not hwnd:
+                hwnd = windll.user32.GetForegroundWindow()
+            if not hwnd:
+                return None
+
+            if self._uia:
+                try:
+                    element = self._uia.ElementFromHandle(hwnd)
+                    if element:
+                        text_pattern = None
+                        for pattern_id in (UIA.UIA_TextPattern2Id, UIA.UIA_TextPatternId):
+                            try:
+                                text_pattern = element.GetCurrentPattern(pattern_id)
+                            except Exception:
+                                text_pattern = None
+                            if text_pattern:
+                                break
+
+                        if text_pattern and hasattr(text_pattern, "GetCaretRange"):
+                            is_active = wintypes.BOOL()
+                            caret_range = text_pattern.GetCaretRange(byref(is_active))
+                            if caret_range:
+                                rects = caret_range.GetBoundingRectangles()
+                                if rects and len(rects) >= 4:
+                                    left = float(rects[0])
+                                    top = float(rects[1])
+                                    width = max(float(rects[2]), 1.0)
+                                    height = max(float(rects[3]), 1.0)
+                                    return {
+                                        'left': left,
+                                        'top': top,
+                                        'width': width,
+                                        'height': height,
+                                    }
+                except Exception as exc:
+                    print(f"⚠️ UI Automation caret rect error: {exc}")
+
+            thread_id = windll.user32.GetWindowThreadProcessId(hwnd, 0)
+            gui_info = GUITHREADINFO(cbSize=sizeof(GUITHREADINFO))
+            result = windll.user32.GetGUIThreadInfo(thread_id, byref(gui_info))
+            if not result:
+                return None
+
+            caret_hwnd = gui_info.hwndCaret or gui_info.hwndFocus or hwnd
+            rect = gui_info.rcCaret
+            left_top = POINT(rect.left, rect.top)
+            right_bottom = POINT(rect.right, rect.bottom)
+            try:
+                windll.user32.ClientToScreen(caret_hwnd, byref(left_top))
+                windll.user32.ClientToScreen(caret_hwnd, byref(right_bottom))
+            except Exception:
+                return None
+
+            width = max(1, right_bottom.x - left_top.x)
+            height = max(1, right_bottom.y - left_top.y)
+            return {
+                'left': float(left_top.x),
+                'top': float(left_top.y),
+                'width': float(width),
+                'height': float(height),
+            }
+        except Exception as exc:
+            print(f"⚠️ Caret rect retrieval failed: {exc}")
+            return None
+
+    @staticmethod
+    def get_scaled_rect(rect: Optional[dict], dpi_scale: float) -> Optional[dict]:
+        """Scale a caret rectangle by the provided DPI factor."""
+        if not rect:
+            return None
+        _ = dpi_scale  # Reserved for future scaling logic when needed
+        return {
+            'left': int(round(rect['left'])),
+            'top': int(round(rect['top'])),
+            'width': max(1, int(round(rect['width']))),
+            'height': max(1, int(round(rect['height']))),
+        }
     
     def get_window_rect(self, hwnd: int) -> Optional[Tuple[int, int, int, int]]:
         """Get window rectangle (left, top, right, bottom) with DPI correction"""
@@ -185,18 +262,9 @@ class CaretTracker:
                 return None
             
             rect = win32gui.GetWindowRect(hwnd)
-            
-            # ✅ FIX 2: Apply DPI scaling to window coordinates
-            dpi_scale = self.get_dpi_scale_factor(hwnd)
-            if dpi_scale != 1.0:
-                left, top, right, bottom = rect
-                rect = (
-                    int(left * dpi_scale),
-                    int(top * dpi_scale),
-                    int(right * dpi_scale),
-                    int(bottom * dpi_scale)
-                )
-            
+
+            # GetWindowRect already returns physical pixels for DPI-aware apps.
+            # Leave coordinates untouched so relative positions stay accurate.
             return rect
         except Exception:
             return None
@@ -447,7 +515,7 @@ class UnderlineOverlayWindow:
     - Supports wavy underlines for spelling errors
     """
     
-    def __init__(self, master_root: Optional[tk.Tk] = None):
+    def __init__(self, master_root: Optional[tk.Tk] = None, dpi_scaler: Optional[DPIScaler] = None):
         """
         Initialize the overlay window.
         
@@ -455,6 +523,7 @@ class UnderlineOverlayWindow:
             master_root: Parent Tkinter root (if exists), or create new one
         """
         self.root = master_root if master_root else tk.Tk()
+        self.dpi_scaler = dpi_scaler or DPIScaler()
         self.underlines: Dict[str, dict] = {}  # word_id -> {x, y, width, color, hwnd}
         self.target_hwnd: Optional[int] = None
         self.visible = False
@@ -463,6 +532,10 @@ class UnderlineOverlayWindow:
         self._sync_thread: Optional[threading.Thread] = None
         self._ui_thread_id = threading.get_ident()
         self._pending_redraw = False
+        self.underline_thickness_px = max(1, self.dpi_scaler.px(1.2))
+        self.wave_amplitude_px = max(1, self.dpi_scaler.px(2))
+        self.wave_wavelength_px = max(2, self.dpi_scaler.px(4))
+        self.wave_step_px = max(2, self.dpi_scaler.px(2))
         
         # Create transparent overlay window
         self.window = tk.Toplevel(self.root)
@@ -586,10 +659,11 @@ class UnderlineOverlayWindow:
         """
         # Create wavy pattern
         points = []
-        amplitude = 2  # Wave height
-        wavelength = 4  # Wave frequency
-        
-        for i in range(0, width, 2):
+        amplitude = self.wave_amplitude_px
+        wavelength = max(self.wave_wavelength_px, 2)
+        step = max(1, min(self.wave_step_px, width))
+
+        for i in range(0, width + step, step):
             offset = amplitude * ((i // wavelength) % 2)
             points.extend([x + i, y + offset])
         
@@ -598,7 +672,7 @@ class UnderlineOverlayWindow:
             return self.canvas.create_line(
                 *points,
                 fill=color,
-                width=2,
+                width=self.underline_thickness_px,
                 smooth=True,
                 tags='underline'
             )
@@ -607,7 +681,7 @@ class UnderlineOverlayWindow:
             return self.canvas.create_line(
                 x, y, x + width, y,
                 fill=color,
-                width=2,
+                width=self.underline_thickness_px,
                 tags='underline'
             )
     
@@ -616,7 +690,7 @@ class UnderlineOverlayWindow:
         return self.canvas.create_line(
             x, y, x + width, y,
             fill=color,
-            width=2,
+            width=self.underline_thickness_px,
             tags='underline'
         )
     
