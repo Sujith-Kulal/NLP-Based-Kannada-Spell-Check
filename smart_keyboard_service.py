@@ -41,6 +41,10 @@ from typing import List, Optional, Tuple, Dict
 
 from dpi_utils import DPIScaler
 
+try:
+    from win32com.client import Dispatch  # noqa: F401
+except ImportError:
+    Dispatch = None  # Word COM automation is optional
 
 try:
     ctypes.windll.shcore.SetProcessDpiAwareness(2)
@@ -637,6 +641,12 @@ class SmartKeyboardService:
             return max(base_padding, dynamic)
         return base_padding
 
+    def _resolve_underline_color(self, has_suggestions: bool) -> str:
+        """Pick underline color based on active interface and suggestion availability."""
+        if self.current_interface == "Microsoft Word":
+            return "#0078D7" if has_suggestions else "#FF3B30"
+        return "#F57C00" if has_suggestions else "#FF3B30"
+
     def type_delimiter_key(self, delimiter):
         """Re-type the delimiter that triggered the suggestion"""
         if not delimiter:
@@ -671,7 +681,7 @@ class SmartKeyboardService:
         """Add or update an underline entry with a stable unique ID."""
         try:
             has_suggestions = len(suggestions) > 0
-            color = "#F57C00" if has_suggestions else "#FF3B30"
+            color = self._resolve_underline_color(has_suggestions)
             style = "wavy"
 
             if not self.underline_overlay.visible:
@@ -939,6 +949,14 @@ class SmartKeyboardService:
         if not word or not self.enabled:
             return
 
+        # Microsoft Word uses native underline rendering through COM
+        if self.current_interface == "Microsoft Word":
+            return self._apply_word_underline_via_com(
+                word,
+                bool(suggestions),
+                suggestions or [],
+            )
+
         try:
             geometry = self._capture_live_geometry()
             overlay_info = self._compute_typed_word_overlay(word, geometry) if geometry else None
@@ -1024,6 +1042,76 @@ class SmartKeyboardService:
             
         except Exception as exc:
             print(f"⚠️ Unable to underline word '{word}': {exc}")
+            return None
+
+    def _apply_word_underline_via_com(
+        self,
+        word: str,
+        has_suggestions: bool,
+        suggestions: List[str],
+    ) -> Optional[str]:
+        """Drive Microsoft Word's native wavy underline via COM automation."""
+        if Dispatch is None:
+            print("⚠️ Word COM automation unavailable (win32com not installed)")
+            return None
+
+        try:
+            word_app = Dispatch("Word.Application")
+        except Exception as exc:
+            print(f"⚠️ Unable to attach to Word: {exc}")
+            return None
+
+        try:
+            doc = word_app.ActiveDocument
+        except Exception as exc:
+            print(f"⚠️ Word automation error (ActiveDocument): {exc}")
+            return None
+
+        if doc is None:
+            print("⚠️ No active Word document detected")
+            return None
+
+        try:
+            find_range = doc.Content.Duplicate
+            find = find_range.Find
+            find.ClearFormatting()
+            find.Text = word
+            find.MatchWholeWord = True
+            find.MatchCase = False
+            find.Forward = True
+            find.Wrap = 0  # wdFindStop
+
+            found = 0
+            marker = "🔵" if has_suggestions else "🔴"
+            underline_style = 4 if has_suggestions else 11  # wdUnderlineWavyHeavy / wdUnderlineWavy
+            underline_color = 12611584 if has_suggestions else 255  # Blue / Red
+
+            while find.Execute():
+                found += 1
+                # Apply underline directly in Word's document range
+                find_range.Font.Underline = underline_style
+                find_range.Font.UnderlineColor = underline_color
+
+                # Collapse to end and continue searching
+                find_range.Collapse(0)
+                find_range.SetRange(find_range.End, doc.Content.End)
+                find = find_range.Find
+                find.ClearFormatting()
+                find.Text = word
+                find.MatchWholeWord = True
+                find.MatchCase = False
+                find.Forward = True
+                find.Wrap = 0
+
+            if found:
+                print(f"{marker} Word underline applied for '{word}' ({found} occurrence{'s' if found != 1 else ''})")
+                return f"word-com-{uuid.uuid4().hex[:6]}"
+
+            print(f"⚠️ Word underline: '{word}' not found in active document")
+            return None
+
+        except Exception as exc:
+            print(f"⚠️ Word underline failed for '{word}': {exc}")
             return None
     
     def get_clipboard_text(self):
@@ -1500,6 +1588,43 @@ class SmartKeyboardService:
             try:
                 self.replacing = True
                 self.popup.hide()
+
+                if self.current_interface == "Microsoft Word":
+                    last_popup_data: Optional[Tuple[str, List[str], Optional[str]]] = None
+
+                    for match in spans:
+                        word = match.group(0)
+                        if len(word) < 2 or not any(self.is_kannada_char(c) for c in word):
+                            continue
+
+                        suggestions, had_error = self.get_suggestions(word)
+                        if not had_error:
+                            continue
+
+                        underline_id = self.show_no_suggestion_marker(
+                            word,
+                            has_suggestions=bool(suggestions),
+                            suggestions=suggestions,
+                        )
+
+                        if suggestions:
+                            last_popup_data = (word, suggestions, underline_id)
+
+                    if last_popup_data:
+                        word, suggestions, underline_id = last_popup_data
+
+                        def _show_last_popup():
+                            self.last_word = word
+                            if underline_id:
+                                self.last_underline_id = underline_id
+                            self.popup.show(suggestions)
+
+                        try:
+                            self.popup.root.after(0, _show_last_popup)
+                        except Exception:
+                            pass
+                    return
+
                 geometry = geometry_snapshot or self._resolve_paste_anchor_geometry()
                 if not geometry:
                     print("⚠️ Unable to resolve paste geometry; skipping underline placement.")
