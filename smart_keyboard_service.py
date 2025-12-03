@@ -343,6 +343,7 @@ class SmartKeyboardService:
         # Initialize Grammarly-style fake underline overlay with DPI + Font + UIA support
         self.underline_overlay = UnderlineOverlayWindow(self.popup.root, dpi_scaler=self.dpi)
         self.word_position_calc = WordPositionCalculator(self.caret_tracker)
+        self.active_overlay_hwnd: Optional[int] = None
         
         # Underline styling + relocation controls
         self.underline_focus_ratio = 0.45  # portion of the word width to underline (centered)
@@ -389,6 +390,8 @@ class SmartKeyboardService:
         self.last_delimiter_char = ' '  # Track the delimiter that triggered suggestion
         self.restore_allowed = False  # Allow one restore after trailing delimiters
         self.last_paste_anchor = None  # Snapshot of caret/window state before paste
+        self.select_all_active = False  # Track if Ctrl+A was just pressed
+        self.ctrl_held = False  # Track if Ctrl key is currently held down
         self.default_text_margin_px = self.dpi.px(18)
         self.default_baseline_offset_px = self.dpi.px(32)
         self.default_line_height_px = max(self.dpi.px(28), 16)
@@ -562,6 +565,228 @@ class SmartKeyboardService:
 
         return removed_any
 
+    def _clear_all_underlines_notepad(self):
+        """Clear all persistent underlines when Ctrl+A + Backspace/Delete is used in Notepad."""
+        print(f"🧹 Clearing all {len(self.misspelled_words)} underlines after select-all delete...")
+        
+        # Clear overlay canvas
+        try:
+            self.underline_overlay.clear_all_underlines()
+        except Exception as e:
+            print(f"⚠️ Error clearing overlay: {e}")
+        
+        # Clear tracking dictionary
+        with self.underline_lock:
+            self.misspelled_words.clear()
+        
+        # Clear document words cache
+        with self.document_lock:
+            self.document_words.clear()
+        
+        # Reset word buffer and related state
+        self.current_word_chars = []
+        self.cursor_index = 0
+        self.last_committed_word_chars = []
+        self.last_word = ""
+        self.last_underline_id = None
+        
+        self._hide_overlay_temporarily()
+
+        print("✅ All underlines cleared")
+
+    def _has_full_document_selection(self) -> bool:
+        """Detect whether the entire document is currently selected in Notepad."""
+        if self.current_interface != "Notepad":
+            return False
+
+        try:
+            edit_hwnd = self._get_notepad_edit_hwnd()
+            if not edit_hwnd:
+                return False
+
+            start = wintypes.DWORD()
+            end = wintypes.DWORD()
+
+            windll.user32.SendMessageW(edit_hwnd, win32con.EM_GETSEL, byref(start), byref(end))
+
+            selection_start = int(start.value)
+            selection_end = int(end.value)
+
+            text_length = windll.user32.SendMessageW(edit_hwnd, win32con.WM_GETTEXTLENGTH, 0, 0)
+            if selection_end == 0xFFFFFFFF:
+                selection_end = text_length
+
+            if selection_end < selection_start:
+                selection_start, selection_end = selection_end, selection_start
+
+            if selection_end <= selection_start:
+                print(f"ℹ️ Select-all check: start={selection_start}, end={selection_end}, length={text_length} → no selection")
+                return False
+
+            if text_length <= 0:
+                print(f"ℹ️ Select-all check: empty document (length={text_length})")
+                return False
+
+            # Require selection from document start and covering (nearly) entire content
+            if selection_start != 0:
+                print(f"ℹ️ Select-all check: selection does not start at 0 (start={selection_start})")
+                return False
+
+            if selection_end >= text_length:
+                print(f"ℹ️ Select-all check: full selection detected (length={text_length})")
+                return True
+
+            # Some editors omit the final newline from the selection length; allow off-by-one in that case
+            almost_full = text_length > 0 and (selection_end + 1) >= text_length
+            print(
+                f"ℹ️ Select-all check: nearly full={almost_full} (end={selection_end}, length={text_length})"
+            )
+            return almost_full
+        except Exception as exc:
+            print(f"⚠️ Full-selection detection failed: {exc}")
+            return False
+
+    def _should_clear_select_all(self) -> bool:
+        """Return True if select-all deletion should clear overlay state."""
+        if self.select_all_active:
+            return True
+        detected = self._has_full_document_selection()
+        if detected:
+            print("ℹ️ Select-all detected via foreground selection")
+        return detected
+
+    def _get_notepad_edit_hwnd(self) -> Optional[int]:
+        """Return the HWND for Notepad's edit control if available."""
+        try:
+            foreground = windll.user32.GetForegroundWindow()
+            if not foreground:
+                return None
+
+            thread_id = windll.user32.GetWindowThreadProcessId(foreground, 0)
+            gui_info = GUITHREADINFO(cbSize=sizeof(GUITHREADINFO))
+
+            if windll.user32.GetGUIThreadInfo(thread_id, byref(gui_info)):
+                edit_hwnd = gui_info.hwndFocus or gui_info.hwndCaret
+                if edit_hwnd:
+                    return edit_hwnd
+
+            child = win32gui.FindWindowEx(foreground, 0, "Edit", None)
+            if child:
+                return child
+        except Exception as exc:
+            print(f"⚠️ Failed to resolve Notepad edit control: {exc}")
+        return None
+
+    def _get_notepad_text_length(self) -> Optional[int]:
+        """Best-effort document length for the active Notepad window."""
+        if self.current_interface != "Notepad":
+            return None
+
+        edit_hwnd = self._get_notepad_edit_hwnd()
+        if not edit_hwnd:
+            return None
+
+        try:
+            length = windll.user32.SendMessageW(edit_hwnd, win32con.WM_GETTEXTLENGTH, 0, 0)
+            return int(length)
+        except Exception as exc:
+            print(f"⚠️ Failed to query Notepad text length: {exc}")
+            return None
+
+    def _schedule_document_empty_check(self):
+        """Run a short-delayed check to clear overlays if the document becomes empty."""
+        if self.current_interface != "Notepad":
+            return
+
+        def _delayed_check():
+            self._check_document_empty()
+
+        threading.Timer(0.05, _delayed_check).start()
+
+    def _check_document_empty(self):
+        if self.current_interface != "Notepad":
+            return
+
+        length = self._get_notepad_text_length()
+        if length is None:
+            return
+
+        if length == 0 and self.misspelled_words:
+            print("🧹 Notepad document is empty after deletion - clearing underlines")
+            self.select_all_active = False
+            # Run on Tk thread to avoid cross-thread canvas calls
+            try:
+                self.popup.root.after(0, self._clear_all_underlines_notepad)
+            except Exception:
+                # Fallback to direct call if Tk loop not available
+                self._clear_all_underlines_notepad()
+
+    def _window_handles_match(self, stored_hwnd: Optional[int], target_hwnd: Optional[int]) -> bool:
+        if not stored_hwnd or not target_hwnd:
+            return False
+        if stored_hwnd == target_hwnd:
+            return True
+        try:
+            stored_root = win32gui.GetAncestor(stored_hwnd, win32con.GA_ROOT)
+        except Exception:
+            stored_root = stored_hwnd
+        try:
+            target_root = win32gui.GetAncestor(target_hwnd, win32con.GA_ROOT)
+        except Exception:
+            target_root = target_hwnd
+        return stored_root == target_root
+
+    def _find_matching_underline_hwnd(self, hwnd: Optional[int]) -> Optional[int]:
+        if not hwnd:
+            return None
+        with self.underline_lock:
+            for info in self.misspelled_words.values():
+                stored_hwnd = info.get('hwnd')
+                if stored_hwnd and self._window_handles_match(stored_hwnd, hwnd):
+                    return stored_hwnd
+        return None
+
+    def _show_overlay_for_hwnd(self, hwnd: Optional[int]):
+        if not hwnd:
+            return
+        try:
+            self.underline_overlay.show(hwnd)
+            self.active_overlay_hwnd = hwnd
+        except Exception as exc:
+            print(f"⚠️ Failed to show overlay for hwnd {hwnd}: {exc}")
+
+    def _hide_overlay_temporarily(self):
+        self.active_overlay_hwnd = None
+        if not self.underline_overlay.visible:
+            return
+        try:
+            self.underline_overlay.hide()
+        except Exception as exc:
+            print(f"⚠️ Failed to hide overlay: {exc}")
+
+    def _handle_interface_switch(
+        self,
+        previous_interface: Optional[str],
+        new_interface: Optional[str],
+        previous_hwnd: Optional[int],
+        new_hwnd: Optional[int],
+    ):
+        overlay_hwnd = self.active_overlay_hwnd
+        overlay_matches_new = (
+            self._window_handles_match(overlay_hwnd, new_hwnd)
+            if overlay_hwnd and new_hwnd
+            else False
+        )
+
+        if overlay_hwnd and not overlay_matches_new:
+            self._hide_overlay_temporarily()
+
+        # Attempt to reattach overlay when returning to a window that still has underlines
+        target_hwnd = self._find_matching_underline_hwnd(new_hwnd)
+
+        if target_hwnd and self.active_overlay_hwnd != target_hwnd:
+            self._show_overlay_for_hwnd(target_hwnd)
+
     def _start_interface_monitor(self):
         """Start monitoring the foreground window so we can log interface changes."""
         if self._interface_monitor and self._interface_monitor.is_alive():
@@ -575,6 +800,7 @@ class SmartKeyboardService:
     def _monitor_active_window(self):
         """Detect foreground window switches and announce the active interface."""
         last_interface = None
+        last_hwnd = None
         while self.running:
             try:
                 hwnd = win32gui.GetForegroundWindow()
@@ -586,11 +812,15 @@ class SmartKeyboardService:
                 title = win32gui.GetWindowText(hwnd)
                 interface = self._classify_interface(class_name, title)
 
-                if interface != last_interface:
+                if interface != last_interface or hwnd != last_hwnd:
+                    previous_interface = last_interface
+                    previous_hwnd = last_hwnd
                     last_interface = interface
+                    last_hwnd = hwnd
                     self.current_interface = interface
                     if interface:
                         print(f"🪟 Active interface detected: {interface}", flush=True)
+                    self._handle_interface_switch(previous_interface, interface, previous_hwnd, hwnd)
             except Exception as exc:
                 print(f"⚠️ Interface detection error: {exc}")
                 time.sleep(1.5)
@@ -684,8 +914,10 @@ class SmartKeyboardService:
             color = self._resolve_underline_color(has_suggestions)
             style = "wavy"
 
-            if draw_overlay and not self.underline_overlay.visible:
-                self.underline_overlay.show(hwnd)
+            if draw_overlay:
+                needs_show = not self.underline_overlay.visible or not self._window_handles_match(self.active_overlay_hwnd, hwnd)
+                if needs_show:
+                    self._show_overlay_for_hwnd(hwnd)
 
             height = caret_height if caret_height and caret_height > 0 else self._get_caret_height(hwnd)
             underline_offset = self._compute_underline_offset(height)
@@ -805,6 +1037,11 @@ class SmartKeyboardService:
         if failed:
             for candidate, reason in failed:
                 print(f"⚠️ Failed to remove overlay underline {candidate}: {reason}")
+
+        with self.underline_lock:
+            no_underlines_remaining = not self.misspelled_words
+        if no_underlines_remaining:
+            self._hide_overlay_temporarily()
 
         return removed_any
     
@@ -1894,6 +2131,9 @@ class SmartKeyboardService:
     def on_press(self, key):
         """Handle key press events"""
         try:
+            # Debug: print every key press
+            print(f"🔑 Key pressed: {key}, ctrl_held={getattr(self, 'ctrl_held', False)}, select_all_active={getattr(self, 'select_all_active', False)}")
+            
             # Skip processing if we're in the middle of replacing
             if self.replacing:
                 return
@@ -1913,16 +2153,39 @@ class SmartKeyboardService:
                     self.selection_anchor = self.cursor_index
                 return
             
-            # Detect Ctrl+V paste operation
+            # Detect Ctrl+V paste operation and Ctrl+A select-all
             if key == Key.ctrl_l or key == Key.ctrl_r:
                 self.clipboard_check_active = True
-            elif self.clipboard_check_active:
+                self.ctrl_held = True
+                print(f"🎛️ Ctrl pressed - ctrl_held set to True")
+            
+            # Check for 'A' or 'V' key while Ctrl is held
+            if self.ctrl_held:
                 # Check if 'v' key is pressed (either as char or vk code)
                 is_v_key = False
-                if hasattr(key, 'char') and key.char and key.char.lower() == 'v':
+                is_a_key = False
+                
+                # Try multiple ways to detect the key
+                key_char = None
+                key_vk = None
+                if hasattr(key, 'char') and key.char:
+                    key_char = key.char.lower()
+                if hasattr(key, 'vk'):
+                    key_vk = key.vk
+                
+                # Also check the key name for KeyCode objects
+                key_name = None
+                try:
+                    key_name = str(key).lower()
+                except:
+                    pass
+                
+                print(f"🔍 Checking key while Ctrl held: char={key_char}, vk={key_vk}, name={key_name}")
+                
+                if key_char == 'v' or key_vk == 86 or (key_name and 'v' in key_name):
                     is_v_key = True
-                elif hasattr(key, 'vk') and key.vk == 86:  # VK code for 'V'
-                    is_v_key = True
+                if key_char == 'a' or key_vk == 65 or key_char == '\x01' or (key_name and "'a'" in key_name):
+                    is_a_key = True
                 
                 if is_v_key:
                     self._start_paste_cooldown(0.8)
@@ -1932,7 +2195,10 @@ class SmartKeyboardService:
                     print("📋 Paste detected - checking clipboard...")
                     threading.Timer(0.3, self.check_pasted_text).start()
                 
-                self.clipboard_check_active = False
+                if is_a_key:
+                    # Ctrl+A detected - mark select-all active
+                    self.select_all_active = True
+                    print(f"📋 Ctrl+A detected - select all active (interface: {self.current_interface})")
             
             if key in (Key.backspace, Key.esc) and self.just_replaced_word:
                 self.just_replaced_word = False
@@ -1989,6 +2255,17 @@ class SmartKeyboardService:
 
             # Buffer-aware editing controls (apply whether popup is visible or not)
             if key == Key.backspace:
+                triggered_via_ctrl = self.select_all_active
+                if self._should_clear_select_all():
+                    reason = "Ctrl+A" if triggered_via_ctrl else "Selection"
+                    print(f"🧹 {reason} + Backspace detected - clearing all underlines (interface: {self.current_interface})")
+                    self._clear_all_underlines_notepad()
+                    self.select_all_active = False
+                    self.reset_current_word()
+                    if self.popup.visible:
+                        self.popup.hide()
+                    return
+                self._schedule_document_empty_check()
                 buffer_before_edit = ''.join(self.current_word_chars)
                 if self.trailing_delimiter_count > 0:
                     self.trailing_delimiter_count = max(0, self.trailing_delimiter_count - 1)
@@ -2068,6 +2345,17 @@ class SmartKeyboardService:
                 return
 
             if key == Key.delete:
+                triggered_via_ctrl = self.select_all_active
+                if self._should_clear_select_all():
+                    reason = "Ctrl+A" if triggered_via_ctrl else "Selection"
+                    print(f"🧹 {reason} + Delete detected - clearing all underlines (interface: {self.current_interface})")
+                    self._clear_all_underlines_notepad()
+                    self.select_all_active = False
+                    self.reset_current_word()
+                    if self.popup.visible:
+                        self.popup.hide()
+                    return
+                self._schedule_document_empty_check()
                 buffer_before_edit = ''.join(self.current_word_chars)
                 self.pending_restore = False
                 removal_checked = False
@@ -2160,6 +2448,10 @@ class SmartKeyboardService:
             elif key == Key.tab:
                 char = '\t'
 
+            # Reset select-all flag when typing any character (user cancelled select-all by typing)
+            if char and self.select_all_active:
+                self.select_all_active = False
+
             if char and self.is_word_delimiter(char):
                 self.pending_restore = False
                 self.last_delimiter_char = char
@@ -2245,9 +2537,10 @@ class SmartKeyboardService:
     
     def on_release(self, key):
         """Handle key release events"""
-        # Reset clipboard check flag when Ctrl is released
+        # Reset clipboard check flag and ctrl_held when Ctrl is released
         if key == Key.ctrl_l or key == Key.ctrl_r:
             self.clipboard_check_active = False
+            self.ctrl_held = False
         if key in (Key.shift, Key.shift_r):
             self.shift_pressed = False
             # Keep selection range (text remains highlighted) but clear anchor
@@ -2315,6 +2608,7 @@ class SmartKeyboardService:
                     self.underline_overlay.destroy()
                 except Exception:
                     pass
+                self.active_overlay_hwnd = None
                 self.popup.root.destroy()
         
         self.popup.root.after(100, check_running)
@@ -2342,6 +2636,7 @@ class SmartKeyboardService:
             self.underline_overlay.clear_all_underlines()
         except Exception as e:
             print(f"⚠️ Error clearing overlay: {e}")
+        self.active_overlay_hwnd = None
         
         with self.underline_lock:
             self.misspelled_words.clear()
