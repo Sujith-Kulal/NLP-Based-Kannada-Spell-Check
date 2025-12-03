@@ -677,14 +677,14 @@ class SmartKeyboardService:
         relative_start_x: Optional[int] = None,
         relative_y: Optional[int] = None,
         caret_height: Optional[int] = None,
+        draw_overlay: bool = True,
     ):
-        """Add or update an underline entry with a stable unique ID."""
         try:
             has_suggestions = len(suggestions) > 0
             color = self._resolve_underline_color(has_suggestions)
             style = "wavy"
 
-            if not self.underline_overlay.visible:
+            if draw_overlay and not self.underline_overlay.visible:
                 self.underline_overlay.show(hwnd)
 
             height = caret_height if caret_height and caret_height > 0 else self._get_caret_height(hwnd)
@@ -737,15 +737,16 @@ class SmartKeyboardService:
                 self.misspelled_words[uid] = underline_info
                 total = len(self.misspelled_words)
 
-            self.underline_overlay.add_underline(
-                word_id=uid,
-                word_x=word_start_x,
-                word_y=underline_y,
-                word_width=word_width,
-                color=color,
-                style=style,
-                hwnd=hwnd,
-            )
+            if draw_overlay:
+                self.underline_overlay.add_underline(
+                    word_id=uid,
+                    word_x=word_start_x,
+                    word_y=underline_y,
+                    word_width=word_width,
+                    color=color,
+                    style=style,
+                    hwnd=hwnd,
+                )
 
             print(
                 f"{'🟠' if has_suggestions else '🔴'} Added persistent underline for "
@@ -809,7 +810,17 @@ class SmartKeyboardService:
     
     def on_mouse_click(self, x, y, button, pressed):
         """Handle mouse clicks to detect clicks on underlined words"""
-        if not pressed or button != Button.left:
+        if button != Button.left:
+            return
+
+        if self.current_interface == "Microsoft Word" and Dispatch is not None:
+            if pressed:
+                return
+            time.sleep(0.05)
+            self._handle_word_click()
+            return
+
+        if not pressed:
             return
         
         # Small delay to let caret position update
@@ -864,6 +875,49 @@ class SmartKeyboardService:
                 else:
                     print(f"⚠️ No suggestions available for '{word}'")
                 break
+
+    def _handle_word_click(self) -> None:
+        """Show suggestions for the currently selected Word token."""
+        try:
+            word_app = Dispatch("Word.Application")
+            selection = getattr(word_app, "Selection", None)
+            if not selection:
+                return
+
+            word_range = selection.Words(1)
+            raw_text = getattr(word_range, "Text", "") if word_range else ""
+        except Exception:
+            raw_text = ""
+
+        word_text = (raw_text or "").strip().strip("\r\n\t\u0007")
+        if not word_text:
+            return
+
+        normalized = re.sub(r"[.,!?;:]+$", "", word_text)
+        if not normalized:
+            return
+
+        with self.underline_lock:
+            items = list(self.misspelled_words.items())
+
+        for uid, info in items:
+            if info.get("word") != normalized:
+                continue
+
+            suggestions = info.get("suggestions") or []
+            if not suggestions:
+                continue
+
+            self.last_underline_id = uid
+            self.last_word = normalized
+            self.popup.show(suggestions)
+            return
+
+        suggestions, had_error = self.get_suggestions(normalized)
+        if had_error and suggestions:
+            self.last_underline_id = None
+            self.last_word = normalized
+            self.popup.show(suggestions)
     
     def _move_caret(self, key, steps: int):
         """Move caret left/right by a given number of steps."""
@@ -948,15 +1002,8 @@ class SmartKeyboardService:
         """
         if not word or not self.enabled:
             return
-
-        # Microsoft Word uses native underline rendering through COM
-        if self.current_interface == "Microsoft Word":
-            return self._apply_word_underline_via_com(
-                word,
-                bool(suggestions),
-                suggestions or [],
-            )
-
+        is_word_app = self.current_interface == "Microsoft Word"
+        underline_id: Optional[str] = None
         try:
             geometry = self._capture_live_geometry()
             overlay_info = self._compute_typed_word_overlay(word, geometry) if geometry else None
@@ -1037,12 +1084,21 @@ class SmartKeyboardService:
                 relative_start_x=relative_start,
                 relative_y=relative_y,
                 caret_height=caret_height,
+                draw_overlay=not is_word_app,
             )
-            return underline_id
-            
         except Exception as exc:
             print(f"⚠️ Unable to underline word '{word}': {exc}")
-            return None
+            underline_id = None
+
+        if is_word_app:
+            com_result = self._apply_word_underline_via_com(
+                word,
+                has_suggestions or bool(suggestions),
+                (suggestions or []),
+            )
+            return underline_id or com_result
+
+        return underline_id
 
     def _apply_word_underline_via_com(
         self,
