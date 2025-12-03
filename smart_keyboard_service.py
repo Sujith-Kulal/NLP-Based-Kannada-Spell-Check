@@ -673,10 +673,13 @@ class SmartKeyboardService:
         word_start_x: int,
         *,
         hwnd: Optional[int] = None,
+        text_hwnd: Optional[int] = None,
         window_rect: Optional[Tuple[int, int, int, int]] = None,
         relative_start_x: Optional[int] = None,
         relative_y: Optional[int] = None,
         caret_height: Optional[int] = None,
+        char_start: Optional[int] = None,
+        char_length: Optional[int] = None,
         draw_overlay: bool = True,
     ):
         try:
@@ -724,6 +727,7 @@ class SmartKeyboardService:
                     'word': word,
                     'suggestions': suggestions,
                     'hwnd': hwnd,
+                    'text_hwnd': text_hwnd,
                     'absolute_position': (word_start_x, underline_y),
                     'relative_start_x': rel_start,
                     'relative_y': rel_y,
@@ -732,6 +736,8 @@ class SmartKeyboardService:
                     'last_rect': rect,
                     'added_at': time.time(),
                     'caret_height': height,
+                    'char_start': char_start,
+                    'char_length': char_length if char_length is not None else len(word),
                 }
 
                 self.misspelled_words[uid] = underline_info
@@ -807,6 +813,213 @@ class SmartKeyboardService:
                 print(f"⚠️ Failed to remove overlay underline {candidate}: {reason}")
 
         return removed_any
+
+    def _shift_underlines_after(
+        self,
+        pivot_index: Optional[int],
+        delta_chars: int,
+        *,
+        hwnd: Optional[int] = None,
+        exclude_uid: Optional[str] = None,
+    ):
+        """Adjust stored character offsets when text before an underline changes."""
+        if not delta_chars or pivot_index is None:
+            return
+
+        with self.underline_lock:
+            for uid, info in self.misspelled_words.items():
+                if uid == exclude_uid:
+                    continue
+                if hwnd and info.get('hwnd') not in (hwnd, None):
+                    continue
+                char_start = info.get('char_start')
+                if char_start is None:
+                    continue
+                if char_start > pivot_index:
+                    info['char_start'] = char_start + delta_chars
+
+    def _schedule_underlines_refresh(self, delay: float = 0.05, *, reason: str = ""):
+        """Trigger an async refresh of underline geometry after document edits."""
+
+        def worker():
+            if delay > 0:
+                time.sleep(delay)
+            try:
+                self._refresh_underlines_geometry(reason=reason)
+            except Exception as exc:
+                print(f"⚠️ Underline refresh failed ({reason or 'unspecified'}): {exc}")
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _refresh_underlines_geometry(self, *, reason: str = ""):
+        """Recalculate underline screen coordinates using live document layout."""
+        with self.underline_lock:
+            entries = list(self.misspelled_words.items())
+
+        if not entries:
+            return
+
+        doc_text = self.get_document_text()
+        if not doc_text:
+            return
+
+        for uid, info in entries:
+            word = info.get('word')
+            hwnd = info.get('hwnd')
+            if not word or not hwnd or not win32gui.IsWindow(hwnd):
+                continue
+
+            text_hwnd = info.get('text_hwnd') or hwnd
+            if not text_hwnd or not win32gui.IsWindow(text_hwnd):
+                text_hwnd = hwnd
+
+            char_start = info.get('char_start')
+            char_length = info.get('char_length') or len(word)
+            if char_start is None or char_length <= 0:
+                continue
+
+            updated_char_start = char_start
+            doc_len = len(doc_text)
+
+            if (
+                updated_char_start < 0
+                or updated_char_start + char_length > doc_len
+                or doc_text[updated_char_start:updated_char_start + char_length] != word
+            ):
+                search_radius = max(32, len(word) * 2)
+                start_idx = max(0, updated_char_start - search_radius)
+                end_idx = min(doc_len, updated_char_start + search_radius)
+                new_index = doc_text.find(word, start_idx, end_idx)
+                if new_index == -1:
+                    new_index = doc_text.find(word)
+                if new_index == -1:
+                    self.remove_persistent_underline(uid=uid)
+                    continue
+                updated_char_start = new_index
+
+            geometry = self._recalculate_word_geometry(
+                word,
+                updated_char_start,
+                text_hwnd,
+                hwnd,
+                info,
+            )
+            if not geometry:
+                continue
+
+            start_x = geometry['start_x']
+            caret_y = geometry['caret_y']
+            word_width = max(1, geometry['width'])
+            window_rect = geometry['window_rect']
+            caret_height = geometry['caret_height']
+            underline_offset = self._compute_underline_offset(caret_height)
+            underline_y = caret_y + underline_offset
+            underline_padding = self._compute_underline_padding(caret_height)
+
+            relative_start = None
+            relative_y = None
+            if window_rect:
+                relative_start = start_x - window_rect[0]
+                relative_y = underline_y - window_rect[1]
+                prev_relative = info.get('relative_y')
+                if relative_y is not None and prev_relative is not None:
+                    tolerance = self.dpi.px(3)
+                    if relative_y + tolerance < prev_relative:
+                        relative_y = prev_relative
+                        underline_y = window_rect[1] + relative_y
+                        caret_y = underline_y - self._compute_underline_offset(caret_height)
+                if relative_y is not None:
+                    relative_y = max(relative_y, self.dpi.px(2))
+
+            bbox = {
+                'left': start_x,
+                'top': underline_y - underline_padding,
+                'right': start_x + word_width,
+                'bottom': underline_y + underline_padding,
+            }
+
+            with self.underline_lock:
+                stored = self.misspelled_words.get(uid)
+                if not stored:
+                    continue
+                stored.update({
+                    'absolute_position': (start_x, underline_y),
+                    'relative_start_x': relative_start,
+                    'relative_y': relative_y,
+                    'width': word_width,
+                    'bbox': bbox,
+                    'caret_height': caret_height,
+                    'char_start': updated_char_start,
+                    'char_length': len(word),
+                    'last_rect': window_rect,
+                    'text_hwnd': text_hwnd,
+                })
+
+            color = self._resolve_underline_color(bool(info.get('suggestions')))
+            self.underline_overlay.add_underline(
+                word_id=uid,
+                word_x=start_x,
+                word_y=underline_y,
+                word_width=word_width,
+                color=color,
+                style='wavy',
+                hwnd=hwnd,
+            )
+
+    def _recalculate_word_geometry(
+        self,
+        word: str,
+        char_start: int,
+        text_hwnd: int,
+        hwnd: int,
+        info: dict,
+    ) -> Optional[dict]:
+        """Measure the onscreen geometry for a word starting at a given index."""
+        if not word or not hwnd or not win32gui.IsWindow(hwnd):
+            return None
+
+        if not text_hwnd or not win32gui.IsWindow(text_hwnd):
+            return None
+
+        try:
+            try:
+                window_rect = win32gui.GetWindowRect(hwnd)
+            except Exception:
+                window_rect = None
+
+            spans = list(re.finditer(r'[^\s\n\r\t.,!?;:]+', word))
+            if not spans:
+                return None
+
+            line_height = info.get('caret_height') or self._estimate_line_height(text_hwnd)
+            geometry = {
+                'hwnd': hwnd,
+                'text_hwnd': text_hwnd,
+                'window_rect': window_rect,
+                'line_height': line_height,
+                'selection_start': char_start,
+            }
+
+            layout_map = self._build_notepad_layout(word, spans, geometry)
+            layout_info = layout_map.get(0)
+            if not layout_info:
+                return None
+
+            caret_height = info.get('caret_height') or self._get_caret_height(hwnd)
+            if caret_height is None:
+                caret_height = line_height
+
+            return {
+                'start_x': layout_info['start_x'],
+                'caret_y': layout_info['baseline_y'],
+                'width': layout_info['width'],
+                'window_rect': window_rect,
+                'caret_height': caret_height,
+            }
+
+        except Exception as exc:
+            print(f"⚠️ Unable to recompute geometry for '{word}': {exc}")
+            return None
     
     def on_mouse_click(self, x, y, button, pressed):
         """Handle mouse clicks to detect clicks on underlined words"""
@@ -990,6 +1203,9 @@ class SmartKeyboardService:
             'caret_x': caret_x,
             'hwnd': geometry.get('hwnd'),
             'window_rect': geometry.get('window_rect'),
+            'text_hwnd': geometry.get('text_hwnd'),
+            'char_start': word_start,
+            'char_length': len(word),
         }
 
     def show_no_suggestion_marker(self, word: str, has_suggestions: bool = False, suggestions: list = None):
@@ -1014,6 +1230,9 @@ class SmartKeyboardService:
             word_start_x = None
             window_rect = None
             hwnd = None
+            text_hwnd = None
+            char_start = None
+            char_length = len(word)
 
             if overlay_info:
                 hwnd = overlay_info.get('hwnd')
@@ -1022,12 +1241,23 @@ class SmartKeyboardService:
                 caret_y = overlay_info.get('caret_y')
                 word_width = overlay_info.get('word_width')
                 word_start_x = overlay_info.get('word_start_x')
+                text_hwnd = overlay_info.get('text_hwnd')
+                char_start = overlay_info.get('char_start')
+                char_length = overlay_info.get('char_length') or char_length
 
             if not hwnd or not win32gui.IsWindow(hwnd):
                 try:
                     hwnd = windll.user32.GetForegroundWindow()
                 except Exception:
                     hwnd = None
+
+            if not text_hwnd and geometry:
+                text_hwnd = geometry.get('text_hwnd')
+
+            if char_start is None and geometry:
+                selection_start = geometry.get('selection_start')
+                if selection_start is not None:
+                    char_start = max(0, selection_start - len(word))
 
             caret_rect_raw = self.caret_tracker.get_caret_rect(hwnd) if self.caret_tracker else None
             caret_rect = self.caret_tracker.get_scaled_rect(caret_rect_raw, self.dpi.scale) if caret_rect_raw else None
@@ -1071,6 +1301,9 @@ class SmartKeyboardService:
                 relative_start = word_start_x - window_rect[0]
                 underline_offset = self._compute_underline_offset(caret_height)
                 relative_y = (caret_y + underline_offset) - window_rect[1]
+
+            if caret_height is None:
+                caret_height = self._estimate_line_height(text_hwnd or hwnd)
             
             underline_id = self.add_persistent_underline(
                 word=word,
@@ -1080,10 +1313,13 @@ class SmartKeyboardService:
                 word_width=word_width,
                 word_start_x=word_start_x,
                 hwnd=hwnd,
+                text_hwnd=text_hwnd,
                 window_rect=window_rect,
                 relative_start_x=relative_start,
                 relative_y=relative_y,
                 caret_height=caret_height,
+                char_start=char_start,
+                char_length=char_length,
                 draw_overlay=not is_word_app,
             )
         except Exception as exc:
@@ -1689,12 +1925,16 @@ class SmartKeyboardService:
                 target_hwnd = geometry['hwnd']
                 window_rect = geometry['window_rect']
                 line_height = geometry['line_height']
+                text_hwnd = geometry.get('text_hwnd')
+                selection_start = geometry.get('selection_start')
                 layout_map = self._build_notepad_layout(full_text, spans, geometry)
                 if not layout_map:
                     print("⚠️ Unable to rebuild Notepad layout; skipping paste underlines.")
                     return
                 last_popup_data: Optional[Tuple[str, List[str]]] = None
                 caret_height = self._get_caret_height(target_hwnd)
+                if caret_height is None:
+                    caret_height = line_height
                 underline_offset = self._compute_underline_offset(caret_height)
 
                 for idx, match in enumerate(spans):
@@ -1723,6 +1963,10 @@ class SmartKeyboardService:
                         relative_start = word_start_x - window_rect[0]
                         relative_y = (caret_y + underline_offset) - window_rect[1]
 
+                    char_start = None
+                    if selection_start is not None:
+                        char_start = selection_start + match.start()
+
                     underline_id = self.add_persistent_underline(
                         word=word,
                         suggestions=suggestions,
@@ -1731,10 +1975,13 @@ class SmartKeyboardService:
                         word_width=word_width,
                         word_start_x=word_start_x,
                         hwnd=target_hwnd,
+                        text_hwnd=text_hwnd,
                         window_rect=window_rect,
                         relative_start_x=relative_start,
                         relative_y=relative_y,
                         caret_height=caret_height,
+                        char_start=char_start,
+                        char_length=len(word),
                     )
 
                     if suggestions:
@@ -1813,6 +2060,19 @@ class SmartKeyboardService:
     def replace_word(self, chosen_word):
         """Replace the misspelled word with chosen suggestion"""
         print(f"✅ Replacing with: '{chosen_word}'")
+        pivot_info = None
+        with self.underline_lock:
+            if self.last_underline_id and self.last_underline_id in self.misspelled_words:
+                pivot_info = self.misspelled_words[self.last_underline_id].copy()
+
+        pivot_index = None
+        pivot_hwnd = None
+        previous_length = len(self.last_word or "")
+        if pivot_info:
+            pivot_index = pivot_info.get('char_start')
+            pivot_hwnd = pivot_info.get('hwnd')
+            previous_length = pivot_info.get('char_length') or previous_length
+
         self.replacing = True
         self.disable_scanning = True
         try:
@@ -1856,6 +2116,15 @@ class SmartKeyboardService:
 
             print("✅ Replacement complete")
 
+            delta_chars = len(chosen_word) - previous_length
+            if delta_chars and pivot_index is not None:
+                self._shift_underlines_after(
+                    pivot_index,
+                    delta_chars,
+                    hwnd=pivot_hwnd,
+                    exclude_uid=self.last_underline_id,
+                )
+
             # Update document dictionary with the replacement
             self.update_document_word(self.last_word, chosen_word)
 
@@ -1876,6 +2145,11 @@ class SmartKeyboardService:
             self.selection_anchor = None
             self.selection_range = None
             self.just_replaced_word = True
+
+            with self.underline_lock:
+                need_refresh = bool(self.misspelled_words)
+            if need_refresh:
+                self._schedule_underlines_refresh(reason="post-replacement")
 
             # Re-check all words from start to end in background
             threading.Thread(
