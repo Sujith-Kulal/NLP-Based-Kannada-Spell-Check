@@ -426,6 +426,7 @@ class SmartKeyboardService:
         # Track the active interface (Notepad, Word, etc.)
         self.current_interface = None
         self._interface_monitor = None
+        self._refresh_scheduled = False
     
     def reset_current_word(self, preserve_delimiter=False, clear_marker=True):
         """Clear the tracked word buffer and reset caret index"""
@@ -1099,8 +1100,20 @@ class SmartKeyboardService:
                 if char_start > pivot_index:
                     info['char_start'] = char_start + delta_chars
 
+    def _schedule_refresh_if_needed(self, reason: str, delay: float = 0.08):
+        """Schedule geometry refresh only when underlines exist."""
+        with self.underline_lock:
+            has_underlines = bool(self.misspelled_words)
+        if has_underlines:
+            self._schedule_underlines_refresh(delay=delay, reason=reason)
+
     def _schedule_underlines_refresh(self, delay: float = 0.05, *, reason: str = ""):
         """Trigger an async refresh of underline geometry after document edits."""
+
+        with self.underline_lock:
+            if self._refresh_scheduled:
+                return
+            self._refresh_scheduled = True
 
         def worker():
             if delay > 0:
@@ -1109,6 +1122,9 @@ class SmartKeyboardService:
                 self._refresh_underlines_geometry(reason=reason)
             except Exception as exc:
                 print(f"⚠️ Underline refresh failed ({reason or 'unspecified'}): {exc}")
+            finally:
+                with self.underline_lock:
+                    self._refresh_scheduled = False
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -2605,6 +2621,7 @@ class SmartKeyboardService:
                     # (i.e., when buffer_before_edit is empty/unknown)
                     if not removed and not self.current_word_chars and not buffer_before_edit.strip():
                         self._remove_underlines_near_caret()
+                    self._schedule_refresh_if_needed("backspace-edit")
                 if self.popup.visible:
                     self.popup.hide()
                 return
@@ -2651,6 +2668,7 @@ class SmartKeyboardService:
                     # (i.e., when buffer_before_edit is empty/unknown)
                     if not removed and not self.current_word_chars and not buffer_before_edit.strip():
                         self._remove_underlines_near_caret()
+                    self._schedule_refresh_if_needed("delete-edit")
                 if self.popup.visible:
                     self.popup.hide()
                 return
@@ -2797,6 +2815,7 @@ class SmartKeyboardService:
                     self.selection_anchor = None
                     self.selection_range = None
                 print(f"⌨️ Typed '{char}' → Buffer: {''.join(self.current_word_chars)} (cursor @ {self.cursor_index})")
+                self._schedule_refresh_if_needed("typing-insert")
         except Exception:
             pass
     
