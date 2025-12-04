@@ -206,6 +206,7 @@ class SuggestionPopup:
         self.on_close_callback = on_close_callback
         self.caret_tracker = caret_tracker
         self.dpi_scaler = dpi_scaler
+        self.current_hwnd: Optional[int] = None
 
         # Handle window close
         self.root.protocol("WM_DELETE_WINDOW", self._on_window_close)
@@ -267,10 +268,15 @@ class SuggestionPopup:
         self.visible = True
         self.root.lift()
         self.root.focus_force()
+        try:
+            self.current_hwnd = windll.user32.GetForegroundWindow()
+        except Exception:
+            self.current_hwnd = None
 
     def hide(self):
         self.root.withdraw()
         self.visible = False
+        self.current_hwnd = None
 
     def select_next(self):
         if not self.visible or not self.suggestions:
@@ -409,7 +415,7 @@ class SmartKeyboardService:
         self.paste_line_offsets = {
             0: self.dpi.px(-6),  # Lift first line slightly for tighter alignment
         }
-        self.paste_default_line_offset_px = self.dpi.px(-22)  # Fallback shift for any additional lines
+        self.paste_default_line_offset_px = self.dpi.px(-18)  # Fallback shift for any additional lines
         self.paste_line_offset_increment_px = self.dpi.px(4)  # Push lower lines down a touch
 
         print("\n✅ Smart Keyboard Service initialized!")
@@ -806,6 +812,13 @@ class SmartKeyboardService:
             if not new_hwnd or new_hwnd not in ignored_hwnds:
                 self._hide_overlay_temporarily()
 
+        try:
+            popup_owner = self.popup.current_hwnd
+        except Exception:
+            popup_owner = None
+        if popup_owner and new_hwnd and not self._window_handles_match(popup_owner, new_hwnd):
+            self.popup.hide()
+
         # Attempt to reattach overlay when returning to a window that still has underlines
         target_hwnd = self._find_matching_underline_hwnd(new_hwnd)
 
@@ -1037,7 +1050,7 @@ class SmartKeyboardService:
         failed = []
 
         with self.underline_lock:
-            candidates = []
+            candidates: List[str] = []
             if uid:
                 if uid in self.misspelled_words:
                     candidates.append(uid)
@@ -1047,6 +1060,49 @@ class SmartKeyboardService:
                     for entry_id, info in self.misspelled_words.items()
                     if info.get('word') == word
                 ]
+
+            if word and len(candidates) > 1:
+                try:
+                    caret_x, caret_y = get_caret_position()
+                except Exception:
+                    caret_x = caret_y = None
+
+                matched_candidate = None
+                if caret_x is not None and caret_y is not None:
+                    for candidate in candidates:
+                        info = self.misspelled_words.get(candidate)
+                        if not info:
+                            continue
+                        width = info.get('width', 0) or 0
+                        if width <= 0:
+                            continue
+                        word_x, word_y = info.get('absolute_position', (0, 0))
+                        hwnd = info.get('hwnd')
+                        rel_x = info.get('relative_start_x')
+                        rel_y = info.get('relative_y')
+                        rect = None
+                        if hwnd and rel_x is not None and rel_y is not None:
+                            try:
+                                rect = win32gui.GetWindowRect(hwnd)
+                            except Exception:
+                                rect = None
+                            if rect:
+                                word_x = rect[0] + rel_x
+                                word_y = rect[1] + rel_y
+
+                        bbox = info.get('bbox') or {}
+                        left = bbox.get('left', word_x)
+                        right = bbox.get('right', word_x + width)
+                        top = bbox.get('top', word_y - self.dpi.px(6))
+                        bottom = bbox.get('bottom', word_y + self.dpi.px(6))
+
+                        if left <= caret_x <= right and top <= caret_y <= bottom:
+                            matched_candidate = candidate
+                            break
+
+                if not matched_candidate:
+                    matched_candidate = candidates[-1]
+                candidates = [matched_candidate] if matched_candidate else candidates[:1]
 
             for candidate in candidates:
                 info = self.misspelled_words.pop(candidate, None)
@@ -1199,13 +1255,25 @@ class SmartKeyboardService:
                 relative_start = start_x - window_rect[0]
                 relative_y = underline_y - window_rect[1]
                 prev_relative = info.get('relative_y')
-                if relative_y is not None and prev_relative is not None:
+                prev_char_start = info.get('char_start')
+                if (
+                    relative_y is not None
+                    and prev_relative is not None
+                    and prev_char_start is not None
+                    and updated_char_start == prev_char_start
+                ):
                     tolerance = self.dpi.px(3)
                     if relative_y + tolerance < prev_relative:
                         relative_y = prev_relative
                         underline_y = window_rect[1] + relative_y
                         caret_y = underline_y - self._compute_underline_offset(caret_height)
                 if relative_y is not None:
+                    min_baseline = int(round((caret_height or self.default_line_height_px) * 0.65))
+                    min_baseline = max(self.dpi.px(2), min_baseline)
+                    if relative_y < min_baseline:
+                        relative_y = min_baseline
+                        underline_y = window_rect[1] + relative_y
+                        caret_y = underline_y - underline_offset
                     relative_y = max(relative_y, self.dpi.px(2))
 
             bbox = {
@@ -1361,6 +1429,15 @@ class SmartKeyboardService:
                 if suggestions:
                     self.last_underline_id = uid
                     self.last_word = word
+                    target_hwnd = info.get('hwnd')
+                    current_hwnd = None
+                    try:
+                        current_hwnd = win32gui.GetForegroundWindow()
+                    except Exception:
+                        current_hwnd = None
+                    if target_hwnd and current_hwnd and not self._window_handles_match(target_hwnd, current_hwnd):
+                        print("ℹ️ Ignoring click: interface switched during click")
+                        return
                     self.popup.show(suggestions)
                 else:
                     print(f"⚠️ No suggestions available for '{word}'")
