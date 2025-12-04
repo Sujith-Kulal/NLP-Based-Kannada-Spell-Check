@@ -226,6 +226,13 @@ class SuggestionPopup:
         self.listbox.bind('<ButtonRelease-1>', self._on_click)
         self.listbox.bind('<Motion>', self._on_hover)
 
+    def get_window_handle(self) -> Optional[int]:
+        """Return the native HWND for the popup window if available."""
+        try:
+            return int(self.root.winfo_id())
+        except Exception:
+            return None
+
     def show(self, suggestions):
         """Show popup near the text caret (where text is being typed)"""
         if not suggestions:
@@ -778,8 +785,25 @@ class SmartKeyboardService:
             else False
         )
 
+        popup_hwnd = None
+        try:
+            popup_hwnd = self.popup.get_window_handle()
+        except Exception:
+            popup_hwnd = None
+
+        overlay_window_hwnd = None
+        try:
+            overlay_window_hwnd = self.underline_overlay.get_window_handle()
+        except Exception:
+            overlay_window_hwnd = None
+
+        ignored_hwnds = {
+            hwnd for hwnd in (popup_hwnd, overlay_window_hwnd) if hwnd
+        }
+
         if overlay_hwnd and not overlay_matches_new:
-            self._hide_overlay_temporarily()
+            if not new_hwnd or new_hwnd not in ignored_hwnds:
+                self._hide_overlay_temporarily()
 
         # Attempt to reattach overlay when returning to a window that still has underlines
         target_hwnd = self._find_matching_underline_hwnd(new_hwnd)
@@ -2245,6 +2269,8 @@ class SmartKeyboardService:
             finally:
                 self.replacing = False
                 self.last_paste_anchor = None
+                self.select_all_active = False
+                self.ctrl_held = False
 
         threading.Thread(target=worker, daemon=True).start()
     
@@ -2312,6 +2338,8 @@ class SmartKeyboardService:
 
         self.replacing = True
         self.disable_scanning = True
+        self.select_all_active = False
+        self.ctrl_held = False
         try:
             self.last_replaced_word = chosen_word
             self.last_replacement_time = time.time()

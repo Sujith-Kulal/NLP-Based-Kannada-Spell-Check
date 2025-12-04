@@ -570,6 +570,13 @@ class UnderlineOverlayWindow:
         
         print("✅ Grammarly-style underline overlay initialized")
 
+    def get_window_handle(self) -> Optional[int]:
+        """Return the native HWND for the overlay window when available."""
+        try:
+            return int(self.window.winfo_id())
+        except Exception:
+            return None
+
     def _run_on_ui_thread(self, func, *args, **kwargs):
         """Execute Tk work on the UI thread even when called from worker threads."""
         def invoke():
