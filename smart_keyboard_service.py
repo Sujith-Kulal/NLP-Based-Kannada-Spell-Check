@@ -2143,8 +2143,6 @@ class SmartKeyboardService:
                 self.popup.hide()
 
                 if self.current_interface == "Microsoft Word":
-                    last_popup_data: Optional[Tuple[str, List[str], Optional[str]]] = None
-
                     for match in spans:
                         word = match.group(0)
                         if len(word) < 2 or not any(self.is_kannada_char(c) for c in word):
@@ -2159,23 +2157,6 @@ class SmartKeyboardService:
                             has_suggestions=bool(suggestions),
                             suggestions=suggestions,
                         )
-
-                        if suggestions:
-                            last_popup_data = (word, suggestions, underline_id)
-
-                    if last_popup_data:
-                        word, suggestions, underline_id = last_popup_data
-
-                        def _show_last_popup():
-                            self.last_word = word
-                            if underline_id:
-                                self.last_underline_id = underline_id
-                            self.popup.show(suggestions)
-
-                        try:
-                            self.popup.root.after(0, _show_last_popup)
-                        except Exception:
-                            pass
                     return
 
                 geometry = geometry_snapshot or self._resolve_paste_anchor_geometry()
@@ -2192,7 +2173,6 @@ class SmartKeyboardService:
                 if not layout_map:
                     print("⚠️ Unable to rebuild Notepad layout; skipping paste underlines.")
                     return
-                last_popup_data: Optional[Tuple[str, List[str]]] = None
                 caret_height = self._get_caret_height(target_hwnd)
                 if caret_height is None:
                     caret_height = line_height
@@ -2244,23 +2224,6 @@ class SmartKeyboardService:
                         char_start=char_start,
                         char_length=len(word),
                     )
-
-                    if suggestions:
-                        last_popup_data = (word, suggestions, underline_id)
-
-                if last_popup_data:
-                    word, suggestions, underline_id = last_popup_data
-
-                    def _show_last_popup():
-                        self.last_word = word
-                        if underline_id:
-                            self.last_underline_id = underline_id
-                        self.popup.show(suggestions)
-
-                    try:
-                        self.popup.root.after(0, _show_last_popup)
-                    except Exception:
-                        pass
 
             except Exception as exc:
                 print(f"❌ Error processing pasted words for underlines: {exc}")
@@ -2791,7 +2754,7 @@ class SmartKeyboardService:
                                 if suggestions:
                                     if underline_id:
                                         self.last_underline_id = underline_id
-                                    self.popup.show(suggestions)
+                                    self.popup.hide()
                                 else:
                                     if underline_id:
                                         # reset so unrelated words don't reuse the id
