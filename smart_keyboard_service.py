@@ -363,6 +363,7 @@ class SmartKeyboardService:
         self.underline_focus_min_px = self.dpi.px(28)
         self.underline_thickness_px = max(1, self.dpi.px(1.2))
         self.underline_offset_px = self.dpi.px(2)
+        self.line0_underline_offset_px = self.dpi.px(6)  # Shared tweak for first-line underlines
         self.underline_lock = threading.Lock()
 
         # Track all misspelled words with persistent underlines (keyed by unique underline id)
@@ -481,14 +482,30 @@ class SmartKeyboardService:
             # Only remove underline if the deleted word was actually a Kannada word
             if before and any(self.is_kannada_char(c) for c in before):
                 print(f"🔍 Removing underline for deleted Kannada word '{before}'")
-                self.remove_persistent_underline(before)
+                caret_index = self._get_caret_char_index()
+                fallback_index = None
+                if caret_index is not None and len(before) > 1:
+                    fallback_index = max(0, caret_index + len(before) - 1)
+                self.remove_persistent_underline(
+                    before,
+                    char_index=caret_index,
+                    fallback_index=fallback_index,
+                )
                 return True
             # Fallback for last committed word (only if it was Kannada)
             if self.last_committed_word_chars:
                 last_word = ''.join(self.last_committed_word_chars).strip()
                 if last_word and any(self.is_kannada_char(c) for c in last_word):
                     print(f"🔍 Removing underline for deleted Kannada word '{last_word}' (from last_committed)")
-                    self.remove_persistent_underline(last_word)
+                    caret_index = self._get_caret_char_index()
+                    fallback_index = None
+                    if caret_index is not None and len(last_word) > 1:
+                        fallback_index = max(0, caret_index + len(last_word) - 1)
+                    self.remove_persistent_underline(
+                        last_word,
+                        char_index=caret_index,
+                        fallback_index=fallback_index,
+                    )
                     return True
             return False
         
@@ -501,7 +518,15 @@ class SmartKeyboardService:
                     # Word was partially deleted, but might still be there - don't remove yet
                     return False
                 # Word was replaced with something different - remove the old underline
-                self.remove_persistent_underline(before)
+                caret_index = self._get_caret_char_index()
+                fallback_index = None
+                if caret_index is not None and len(before) > 1:
+                    fallback_index = max(0, caret_index + len(before) - 1)
+                self.remove_persistent_underline(
+                    before,
+                    char_index=caret_index,
+                    fallback_index=fallback_index,
+                )
                 return True
         return False
 
@@ -705,6 +730,55 @@ class SmartKeyboardService:
             return int(length)
         except Exception as exc:
             print(f"⚠️ Failed to query Notepad text length: {exc}")
+            return None
+
+    def _get_caret_char_index(self) -> Optional[int]:
+        """Return insertion-point index within the focused edit control when available."""
+        candidate_hwnds: List[int] = []
+
+        try:
+            _, focus_hwnd = self._get_focus_handles()
+            if focus_hwnd:
+                candidate_hwnds.append(focus_hwnd)
+        except Exception:
+            pass
+
+        if self.current_interface == "Notepad":
+            try:
+                edit_hwnd = self._get_notepad_edit_hwnd()
+                if edit_hwnd and edit_hwnd not in candidate_hwnds:
+                    candidate_hwnds.append(edit_hwnd)
+            except Exception:
+                pass
+
+        for hwnd in candidate_hwnds:
+            if not hwnd or not win32gui.IsWindow(hwnd):
+                continue
+            try:
+                start = wintypes.DWORD()
+                end = wintypes.DWORD()
+                windll.user32.SendMessageW(hwnd, win32con.EM_GETSEL, byref(start), byref(end))
+                caret_index = int(end.value)
+                if caret_index >= 0:
+                    return caret_index
+            except Exception:
+                continue
+        return None
+
+    def _get_line_index_from_char(
+        self,
+        text_hwnd: Optional[int],
+        char_index: Optional[int],
+    ) -> Optional[int]:
+        """Return zero-based visual line index for a character when supported."""
+        if not text_hwnd or char_index is None:
+            return None
+        try:
+            line_idx = windll.user32.SendMessageW(text_hwnd, win32con.EM_LINEFROMCHAR, char_index, 0)
+            if line_idx in (-1, 0xFFFFFFFF):
+                return None
+            return int(line_idx)
+        except Exception:
             return None
 
     def _schedule_document_empty_check(self):
@@ -987,6 +1061,25 @@ class SmartKeyboardService:
                 'bottom': underline_y + underline_padding,
             }
 
+            line_index = self._get_line_index_from_char(text_hwnd, char_start)
+            if line_index is None and char_start is not None and char_length:
+                try:
+                    alt_index = max(0, char_start + char_length - 1)
+                except Exception:
+                    alt_index = char_start
+                if alt_index is not None:
+                    line_index = self._get_line_index_from_char(text_hwnd, alt_index)
+            if line_index is None:
+                try:
+                    if rect and height:
+                        line_index = int(round((underline_y - rect[1]) / max(1, height)))
+                    elif height:
+                        line_index = int(round(caret_y / max(1, height)))
+                except Exception:
+                    line_index = None
+            if line_index is not None and line_index < 0:
+                line_index = 0
+
             with self.underline_lock:
                 underline_index = self.underline_sequence
                 self.underline_sequence += 1
@@ -1008,6 +1101,7 @@ class SmartKeyboardService:
                     'caret_height': height,
                     'char_start': char_start,
                     'char_length': char_length if char_length is not None else len(word),
+                    'line_index': line_index,
                 }
 
                 self.misspelled_words[uid] = underline_info
@@ -1039,6 +1133,9 @@ class SmartKeyboardService:
         self,
         word: Optional[str] = None,
         uid: Optional[str] = None,
+        *,
+        char_index: Optional[int] = None,
+        fallback_index: Optional[int] = None,
     ) -> bool:
         """Remove persistent underline entries by unique ID or by word."""
 
@@ -1062,13 +1159,61 @@ class SmartKeyboardService:
                 ]
 
             if word and len(candidates) > 1:
+                caret_index = char_index
+                if caret_index is None:
+                    caret_index = self._get_caret_char_index()
+                matched_candidate = None
+                if caret_index is not None:
+                    best_score = None
+                    for candidate in candidates:
+                        info = self.misspelled_words.get(candidate)
+                        if not info:
+                            continue
+                        char_start = info.get('char_start')
+                        char_length = info.get('char_length') or len(info.get('word') or "")
+                        if char_start is None:
+                            continue
+                        span_length = max(char_length, 1)
+                        span_start = char_start
+                        span_end = char_start + span_length  # exclusive upper bound
+                        if span_start <= caret_index < span_end:
+                            score = 0
+                        else:
+                            distance = min(abs(caret_index - span_start), abs(caret_index - (span_end - 1)))
+                            score = distance + 1
+                        if best_score is None or score < best_score:
+                            best_score = score
+                            matched_candidate = candidate
+
+                if matched_candidate is None and fallback_index is not None:
+                    caret_index = fallback_index
+                    best_score = None
+                    for candidate in candidates:
+                        info = self.misspelled_words.get(candidate)
+                        if not info:
+                            continue
+                        char_start = info.get('char_start')
+                        char_length = info.get('char_length') or len(info.get('word') or "")
+                        if char_start is None:
+                            continue
+                        span_length = max(char_length, 1)
+                        span_start = char_start
+                        span_end = char_start + span_length
+                        if span_start <= caret_index < span_end:
+                            score = 0
+                        else:
+                            distance = min(abs(caret_index - span_start), abs(caret_index - (span_end - 1)))
+                            score = distance + 1
+                        if best_score is None or score < best_score:
+                            best_score = score
+                            matched_candidate = candidate
+
                 try:
                     caret_x, caret_y = get_caret_position()
                 except Exception:
                     caret_x = caret_y = None
 
-                matched_candidate = None
-                if caret_x is not None and caret_y is not None:
+                if matched_candidate is None and caret_x is not None and caret_y is not None:
                     for candidate in candidates:
                         info = self.misspelled_words.get(candidate)
                         if not info:
@@ -1192,6 +1337,25 @@ class SmartKeyboardService:
         if not entries:
             return
 
+        baseline_map: Dict[int, Dict[int, int]] = {}
+        for _, stored_info in entries:
+            hwnd = stored_info.get('hwnd')
+            if not hwnd:
+                continue
+            line_idx = stored_info.get('line_index')
+            relative = stored_info.get('relative_y')
+            if line_idx is None or relative is None:
+                continue
+            try:
+                normalized_line = max(0, int(line_idx))
+            except (TypeError, ValueError):
+                continue
+            try:
+                relative_val = int(round(relative))
+            except Exception:
+                continue
+            baseline_map.setdefault(hwnd, {}).setdefault(normalized_line, relative_val)
+
         doc_text = self.get_document_text()
         if not doc_text:
             return
@@ -1247,6 +1411,45 @@ class SmartKeyboardService:
             caret_height = geometry['caret_height']
             underline_offset = self._compute_underline_offset(caret_height)
             underline_y = caret_y + underline_offset
+            # ----------------------------------------------------------
+            # Maintain shared adjustments for the first two visual lines
+            # ----------------------------------------------------------
+            line_index = self._get_line_index_from_char(text_hwnd, updated_char_start)
+            if line_index is None and char_length:
+                try:
+                    alt_index = max(0, updated_char_start + char_length - 1)
+                except Exception:
+                    alt_index = updated_char_start
+                if alt_index is not None:
+                    line_index = self._get_line_index_from_char(text_hwnd, alt_index)
+            if line_index is None:
+                prior_index = info.get('line_index')
+                if prior_index is not None:
+                    try:
+                        line_index = int(prior_index)
+                    except (TypeError, ValueError):
+                        line_index = None
+            if line_index is None and window_rect:
+                try:
+                    reference_height = caret_height or info.get('caret_height') or self._estimate_line_height(text_hwnd)
+                    if reference_height and reference_height > 0:
+                        relative_line = underline_y - window_rect[1]
+                        line_index = int(round(relative_line / reference_height))
+                except Exception:
+                    line_index = None
+            if line_index is not None and line_index < 0:
+                line_index = 0
+
+            stored_line_baseline = None
+            if hwnd and line_index is not None:
+                hw_lines = baseline_map.get(hwnd)
+                if hw_lines:
+                    stored_line_baseline = hw_lines.get(line_index)
+
+            if stored_line_baseline is not None and window_rect:
+                underline_y = window_rect[1] + stored_line_baseline
+            elif line_index == 0:
+                underline_y += self.line0_underline_offset_px
             underline_padding = self._compute_underline_padding(caret_height)
 
             relative_start = None
@@ -1268,12 +1471,6 @@ class SmartKeyboardService:
                         underline_y = window_rect[1] + relative_y
                         caret_y = underline_y - self._compute_underline_offset(caret_height)
                 if relative_y is not None:
-                    min_baseline = int(round((caret_height or self.default_line_height_px) * 0.65))
-                    min_baseline = max(self.dpi.px(2), min_baseline)
-                    if relative_y < min_baseline:
-                        relative_y = min_baseline
-                        underline_y = window_rect[1] + relative_y
-                        caret_y = underline_y - underline_offset
                     relative_y = max(relative_y, self.dpi.px(2))
 
             bbox = {
@@ -1298,7 +1495,24 @@ class SmartKeyboardService:
                     'char_length': len(word),
                     'last_rect': window_rect,
                     'text_hwnd': text_hwnd,
+                    'line_index': line_index,
                 })
+
+            if (
+                hwnd
+                and window_rect
+                and line_index is not None
+                and relative_y is not None
+            ):
+                normalized_index = None
+                relative_val = None
+                try:
+                    normalized_index = max(0, int(line_index))
+                    relative_val = int(round(relative_y))
+                except Exception:
+                    pass
+                if normalized_index is not None and relative_val is not None:
+                    baseline_map.setdefault(hwnd, {})[normalized_index] = relative_val
 
             color = self._resolve_underline_color(bool(info.get('suggestions')))
             self.underline_overlay.add_underline(
@@ -2194,7 +2408,8 @@ class SmartKeyboardService:
                 layout[span_idx] = {
                     'start_x': screen_start_x,
                     'baseline_y': baseline_y,
-                    'width': word_width
+                    'width': word_width,
+                    'line_number': line_number,
                 }
         finally:
             if hdc:
@@ -2454,7 +2669,15 @@ class SmartKeyboardService:
             if self.last_underline_id:
                 removed = self.remove_persistent_underline(uid=self.last_underline_id)
             if not removed and self.last_word:
-                self.remove_persistent_underline(self.last_word)
+                caret_index = self._get_caret_char_index()
+                fallback_index = None
+                if caret_index is not None and len(self.last_word) > 1:
+                    fallback_index = max(0, caret_index + len(self.last_word) - 1)
+                self.remove_persistent_underline(
+                    self.last_word,
+                    char_index=caret_index,
+                    fallback_index=fallback_index,
+                )
             self.last_underline_id = None
 
             # Clear buffers to prevent reprocessing the replaced word
@@ -2857,7 +3080,15 @@ class SmartKeyboardService:
                                     self.popup.hide()
                             else:
                                 # Word is correct - remove any existing underline for this word
-                                self.remove_persistent_underline(word)
+                                caret_index = self._get_caret_char_index()
+                                fallback_index = None
+                                if caret_index is not None and len(word) > 1:
+                                    fallback_index = max(0, caret_index - 1)
+                                self.remove_persistent_underline(
+                                    word,
+                                    char_index=caret_index,
+                                    fallback_index=fallback_index,
+                                )
                                 self.popup.hide()
                 else:
                     # ✅ Hide popup if no word was typed (multiple spaces, etc.)
