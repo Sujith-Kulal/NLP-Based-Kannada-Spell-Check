@@ -1948,9 +1948,31 @@ class SmartKeyboardService:
 
             while find.Execute():
                 found += 1
-                # Apply underline directly in Word's document range
-                find_range.Font.Underline = underline_style
-                find_range.Font.UnderlineColor = underline_color
+                range_to_format = find_range.Duplicate
+                try:
+                    range_to_format.MoveStartWhile(" \t\r\n", 1)
+                except Exception:
+                    pass
+                try:
+                    range_to_format.MoveEndWhile(" \t\r\n", -1)
+                except Exception:
+                    pass
+
+                has_chars = range_to_format.Characters.Count > 0
+                if has_chars:
+                    # Apply underline directly in Word's document range (excluding whitespace)
+                    range_to_format.Font.Underline = underline_style
+                    range_to_format.Font.UnderlineColor = underline_color
+
+                    # Ensure trailing whitespace after the word stays clean so squiggles don't bridge words
+                    try:
+                        space_range = doc.Range(range_to_format.End, min(range_to_format.End + 1, doc.Content.End))
+                        if space_range and space_range.Characters.Count:
+                            space_range.Font.Underline = 0
+                            space_range.Font.UnderlineColor = 0
+                            space_range.Font.UnderlineColorIndex = 0
+                    except Exception:
+                        pass
 
                 # Collapse to end and continue searching
                 find_range.Collapse(0)
@@ -1973,6 +1995,124 @@ class SmartKeyboardService:
         except Exception as exc:
             print(f"⚠️ Word underline failed for '{word}': {exc}")
             return None
+
+    def _clear_word_underline_for_replacement(self, word_text: str, delimiter: str):
+        """Clear underline styling from the word we just replaced in Microsoft Word."""
+        if self.current_interface != "Microsoft Word" or Dispatch is None:
+            return
+
+        try:
+            word_app = Dispatch("Word.Application")
+        except Exception as exc:
+            print(f"⚠️ Unable to attach to Word for underline clear: {exc}")
+            return
+
+        try:
+            selection = getattr(word_app, "Selection", None)
+            document = getattr(word_app, "ActiveDocument", None)
+            if not selection or not document:
+                return
+
+            delimiter_len = len(delimiter or "")
+            end_pos = selection.Start
+            if delimiter_len:
+                end_pos = max(0, end_pos - delimiter_len)
+
+            word_len = len(word_text or "")
+            if word_len <= 0:
+                return
+
+            start_pos = max(0, end_pos - word_len)
+            if start_pos >= end_pos:
+                return
+
+            cleanup_range = document.Range(start_pos, end_pos)
+            if not cleanup_range:
+                return
+
+            sampled = (cleanup_range.Text or "").strip()
+            try:
+                cleanup_range.Font.Underline = 0
+                cleanup_range.Font.UnderlineColor = 0
+                cleanup_range.Font.UnderlineColorIndex = 0
+                if delimiter_len:
+                    try:
+                        gap_range = document.Range(end_pos, min(end_pos + delimiter_len, document.Content.End))
+                        if gap_range and gap_range.Characters.Count:
+                            gap_range.Font.Underline = 0
+                            gap_range.Font.UnderlineColor = 0
+                            gap_range.Font.UnderlineColorIndex = 0
+                    except Exception:
+                        pass
+                if sampled:
+                    print(f"🧼 Cleared Word underline for '{sampled}' after replacement")
+            except Exception as exc:
+                print(f"⚠️ Failed to clear Word underline: {exc}")
+        except Exception as exc:
+            print(f"⚠️ Word underline cleanup error: {exc}")
+
+    def _cleanup_word_whitespace_after_space(self):
+        """Ensure a newly inserted space near a misspelled Word keeps underlines separate."""
+        if self.current_interface != "Microsoft Word" or Dispatch is None:
+            return
+
+        try:
+            word_app = Dispatch("Word.Application")
+            selection = getattr(word_app, "Selection", None)
+            document = getattr(word_app, "ActiveDocument", None)
+            if not selection or not document:
+                return
+
+            caret_pos = selection.Start
+            if caret_pos > 0:
+                whitespace_range = document.Range(max(0, caret_pos - 1), caret_pos)
+                if whitespace_range and whitespace_range.Characters.Count:
+                    value = whitespace_range.Text
+                    if value and value in (" ", "\t"):
+                        whitespace_range.Font.Underline = 0
+                        whitespace_range.Font.UnderlineColor = 0
+                        whitespace_range.Font.UnderlineColorIndex = 0
+
+            word_obj = selection.Words(1) if selection else None
+            if not word_obj:
+                return
+
+            word_range = word_obj.Duplicate
+            original_style = word_range.Font.Underline
+            if not original_style:
+                return
+
+            original_color = word_range.Font.UnderlineColor
+            original_color_index = word_range.Font.UnderlineColorIndex
+
+            trimmed = word_range.Duplicate
+            try:
+                trimmed.MoveStartWhile(" \t\r\n", 1)
+            except Exception:
+                pass
+            try:
+                trimmed.MoveEndWhile(" \t\r\n", -1)
+            except Exception:
+                pass
+
+            if trimmed.Characters.Count <= 0:
+                return
+
+            try:
+                word_range.Font.Underline = 0
+                word_range.Font.UnderlineColor = 0
+                word_range.Font.UnderlineColorIndex = 0
+            except Exception:
+                pass
+
+            try:
+                trimmed.Font.Underline = original_style
+                trimmed.Font.UnderlineColor = original_color
+                trimmed.Font.UnderlineColorIndex = original_color_index
+            except Exception:
+                pass
+        except Exception as exc:
+            print(f"⚠️ Word whitespace cleanup failed: {exc}")
     
     def get_clipboard_text(self):
         """Get text from clipboard safely"""
@@ -2647,6 +2787,9 @@ class SmartKeyboardService:
             self.last_delimiter_char = delimiter
             self.trailing_delimiter_count = 1
 
+            if self.current_interface == "Microsoft Word":
+                self._clear_word_underline_for_replacement(chosen_word, delimiter)
+
             # Wait longer before resetting flag to ensure space is fully processed
             time.sleep(0.15)
 
@@ -3095,6 +3238,11 @@ class SmartKeyboardService:
                     self.popup.hide()
                 # Always clear buffer after delimiter
                 self.reset_current_word(preserve_delimiter=True, clear_marker=False)
+                if char == ' ' and self.current_interface == "Microsoft Word":
+                    try:
+                        self.popup.root.after(60, self._cleanup_word_whitespace_after_space)
+                    except Exception:
+                        threading.Thread(target=self._cleanup_word_whitespace_after_space, daemon=True).start()
             elif char:
                 self.pending_restore = False
                 self.restore_allowed = False
