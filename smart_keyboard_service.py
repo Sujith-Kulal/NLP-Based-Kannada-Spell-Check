@@ -549,6 +549,9 @@ class SmartKeyboardService:
     def _remove_underlines_near_caret(self, tolerance: int = 8) -> bool:
         """Remove underline markers that intersect the current caret location."""
 
+        if self.current_interface == "Notepad":
+            return False
+
         try:
             caret_x, caret_y = get_caret_position()
         except Exception:
@@ -557,7 +560,8 @@ class SmartKeyboardService:
         with self.underline_lock:
             underline_items = list(self.misspelled_words.items())
 
-        removal_candidates = []
+        best_candidate = None
+        best_distance = None
         for uid, info in underline_items:
             width = info.get('width', 0) or 0
             if width <= 0:
@@ -594,15 +598,19 @@ class SmartKeyboardService:
             vertical_hit = top <= caret_y <= bottom
 
             if horizontal_hit and vertical_hit:
-                removal_candidates.append((uid, info.get('word')))
+                center_x = left + (width / 2.0)
+                distance = abs(caret_x - center_x)
+                if best_distance is None or distance < best_distance:
+                    best_candidate = (uid, info.get('word'))
+                    best_distance = distance
 
-        removed_any = False
-        for candidate, word in removal_candidates:
+        if best_candidate:
+            candidate, word = best_candidate
             if self.remove_persistent_underline(uid=candidate):
                 print(f"🧽 Cleared underline id={candidate} near caret for '{word}'")
-                removed_any = True
+                return True
 
-        return removed_any
+        return False
 
     def _clear_all_underlines_notepad(self):
         """Clear all persistent underlines when Ctrl+A + Backspace/Delete is used in Notepad."""
@@ -3060,14 +3068,15 @@ class SmartKeyboardService:
                     removal_checked = True
                 if removal_checked:
                     removed = self._maybe_remove_underline_after_edit(buffer_before_edit)
-                    # Only use caret-based removal as last resort when we truly don't know which word was deleted
-                    # (i.e., when buffer_before_edit is empty/unknown)
-                    if not removed and not self.current_word_chars and not buffer_before_edit.strip():
-                        self._remove_underlines_near_caret()
+                    if removed:
+                        return
+                    if self.current_interface != "Notepad":
+                        if not removed and not self.current_word_chars and not buffer_before_edit.strip():
+                            self._remove_underlines_near_caret()
                     self._schedule_refresh_if_needed("backspace-edit")
-                if self.popup.visible:
-                    self.popup.hide()
-                return
+                    if self.popup.visible:
+                        self.popup.hide()
+                    return
 
             if key == Key.delete:
                 triggered_via_ctrl = self.select_all_active
@@ -3107,14 +3116,15 @@ class SmartKeyboardService:
                     removal_checked = True
                 if removal_checked:
                     removed = self._maybe_remove_underline_after_edit(buffer_before_edit)
-                    # Only use caret-based removal as last resort when we truly don't know which word was deleted
-                    # (i.e., when buffer_before_edit is empty/unknown)
-                    if not removed and not self.current_word_chars and not buffer_before_edit.strip():
-                        self._remove_underlines_near_caret()
+                    if removed:
+                        return
+                    if self.current_interface != "Notepad":
+                        if not removed and not self.current_word_chars and not buffer_before_edit.strip():
+                            self._remove_underlines_near_caret()
                     self._schedule_refresh_if_needed("delete-edit")
-                if self.popup.visible:
-                    self.popup.hide()
-                return
+                    if self.popup.visible:
+                        self.popup.hide()
+                    return
 
             if key == Key.left:
                 self.pending_restore = False
