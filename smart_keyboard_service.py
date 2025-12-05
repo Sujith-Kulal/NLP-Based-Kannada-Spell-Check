@@ -1024,7 +1024,7 @@ class SmartKeyboardService:
         """Pick underline color based on active interface and suggestion availability."""
         if self.current_interface == "Microsoft Word":
             return "#FF3B30" if has_suggestions else "#F57C00"
-        return "#F57C00" if has_suggestions else "#FF3B30"
+        return "#FF3B30" if has_suggestions else "#F57C00"
 
     def type_delimiter_key(self, delimiter):
         """Re-type the delimiter that triggered the suggestion"""
