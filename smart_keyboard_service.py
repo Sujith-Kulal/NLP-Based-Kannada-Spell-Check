@@ -1023,7 +1023,7 @@ class SmartKeyboardService:
     def _resolve_underline_color(self, has_suggestions: bool) -> str:
         """Pick underline color based on active interface and suggestion availability."""
         if self.current_interface == "Microsoft Word":
-            return "#0078D7" if has_suggestions else "#FF3B30"
+            return "#F57C00" if has_suggestions else "#FF3B30"
         return "#F57C00" if has_suggestions else "#FF3B30"
 
     def type_delimiter_key(self, delimiter):
@@ -1986,9 +1986,9 @@ class SmartKeyboardService:
             find.Wrap = 0  # wdFindStop
 
             found = 0
-            marker = "🔵" if has_suggestions else "🔴"
-            underline_style = 4 if has_suggestions else 11  # wdUnderlineWavyHeavy / wdUnderlineWavy
-            underline_color = 12611584 if has_suggestions else 255  # Blue / Red
+            marker = "🟠" if has_suggestions else "🔴"
+            underline_style = 11  # wdUnderlineWavy
+            underline_color = 26367 if has_suggestions else 255  # Orange / Red (WdColor)
 
             while find.Execute():
                 found += 1
