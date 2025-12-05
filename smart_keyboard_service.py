@@ -641,6 +641,15 @@ class SmartKeyboardService:
 
         print("✅ All underlines cleared")
 
+    def _clear_all_underlines_notepad_async(self):
+        """Schedule a safe underline clear on the Tk thread when we detect empty content."""
+        if not self.misspelled_words:
+            return
+        try:
+            self.popup.root.after(0, self._clear_all_underlines_notepad)
+        except Exception:
+            self._clear_all_underlines_notepad()
+
     def _has_full_document_selection(self) -> bool:
         """Detect whether the entire document is currently selected in Notepad."""
         if self.current_interface != "Notepad":
@@ -739,6 +748,25 @@ class SmartKeyboardService:
         except Exception as exc:
             print(f"⚠️ Failed to query Notepad text length: {exc}")
             return None
+
+    def _is_notepad_document_empty(self) -> bool:
+        """Return True when the focused Notepad buffer currently has no visible content."""
+        if self.current_interface != "Notepad":
+            return False
+
+        length = self._get_notepad_text_length()
+        if length is not None:
+            return length == 0
+
+        try:
+            text_snapshot = self.get_document_text()
+        except Exception:
+            text_snapshot = ""
+
+        if not text_snapshot:
+            return True
+
+        return text_snapshot.strip() == ""
 
     def _get_caret_char_index(self) -> Optional[int]:
         """Return insertion-point index within the focused edit control when available."""
@@ -2004,9 +2032,32 @@ class SmartKeyboardService:
             print(f"⚠️ Word underline failed for '{word}': {exc}")
             return None
 
+    def _reset_word_range_underlines(self, target_range, *, label: Optional[str] = None) -> bool:
+        """Remove custom underline styling from a specific Word range."""
+        if target_range is None:
+            return False
+        try:
+            if target_range.Characters.Count <= 0:
+                return False
+            target_range.Font.Underline = 0
+            target_range.Font.UnderlineColor = 0
+            target_range.Font.UnderlineColorIndex = 0
+            if label:
+                cleaned = (target_range.Text or "").strip()
+                if cleaned:
+                    print(f"🧼 Cleared Word underline for '{cleaned}' ({label})")
+            return True
+        except Exception as exc:
+            print(f"⚠️ Failed to clear Word underline{f' ({label})' if label else ''}: {exc}")
+            return False
+
     def _clear_word_underline_for_replacement(self, word_text: str, delimiter: str):
         """Clear underline styling from the word we just replaced in Microsoft Word."""
         if self.current_interface != "Microsoft Word" or Dispatch is None:
+            return
+
+        word_text = word_text or ""
+        if not word_text.strip():
             return
 
         try:
@@ -2022,40 +2073,92 @@ class SmartKeyboardService:
                 return
 
             delimiter_len = len(delimiter or "")
-            end_pos = selection.Start
+            selection_anchor = selection.Start
             if delimiter_len:
-                end_pos = max(0, end_pos - delimiter_len)
+                selection_anchor = max(0, selection_anchor - delimiter_len)
 
-            word_len = len(word_text or "")
-            if word_len <= 0:
-                return
+            search_span = max(128, len(word_text) * 6)
+            search_start = max(0, selection_anchor - search_span)
+            search_range = document.Range(search_start, selection_anchor)
 
-            start_pos = max(0, end_pos - word_len)
-            if start_pos >= end_pos:
-                return
+            best_range = None
+            if search_range and search_range.Start < search_range.End:
+                find = search_range.Find
+                find.ClearFormatting()
+                find.Text = word_text
+                find.MatchWholeWord = True
+                find.MatchCase = False
+                find.Forward = True
+                find.Wrap = 0  # wdFindStop
 
-            cleanup_range = document.Range(start_pos, end_pos)
-            if not cleanup_range:
-                return
-
-            sampled = (cleanup_range.Text or "").strip()
-            try:
-                cleanup_range.Font.Underline = 0
-                cleanup_range.Font.UnderlineColor = 0
-                cleanup_range.Font.UnderlineColorIndex = 0
-                if delimiter_len:
+                while find.Execute():
+                    candidate = search_range.Duplicate
                     try:
-                        gap_range = document.Range(end_pos, min(end_pos + delimiter_len, document.Content.End))
-                        if gap_range and gap_range.Characters.Count:
-                            gap_range.Font.Underline = 0
-                            gap_range.Font.UnderlineColor = 0
-                            gap_range.Font.UnderlineColorIndex = 0
+                        candidate.MoveStartWhile(" \t\r\n", 1)
                     except Exception:
                         pass
-                if sampled:
-                    print(f"🧼 Cleared Word underline for '{sampled}' after replacement")
-            except Exception as exc:
-                print(f"⚠️ Failed to clear Word underline: {exc}")
+                    try:
+                        candidate.MoveEndWhile(" \t\r\n", -1)
+                    except Exception:
+                        pass
+
+                    if candidate.Characters.Count > 0:
+                        best_range = candidate.Duplicate
+
+                    # Narrow the search window to continue looking forward
+                    new_start = candidate.End
+                    if new_start >= selection_anchor:
+                        break
+                    search_range.SetRange(new_start, selection_anchor)
+                    find = search_range.Find
+                    find.ClearFormatting()
+                    find.Text = word_text
+                    find.MatchWholeWord = True
+                    find.MatchCase = False
+                    find.Forward = True
+                    find.Wrap = 0
+
+            if best_range is None:
+                fallback_start = max(0, selection_anchor - len(word_text))
+                best_range = document.Range(fallback_start, selection_anchor)
+
+            cleared = False
+            if best_range and best_range.Start < best_range.End:
+                cleared = self._reset_word_range_underlines(best_range, label="post-replacement")
+
+            if delimiter_len:
+                try:
+                    gap_range = document.Range(selection_anchor, min(selection_anchor + delimiter_len, document.Content.End))
+                    if gap_range and gap_range.Characters.Count:
+                        self._reset_word_range_underlines(gap_range, label="delimiter cleanup")
+                except Exception:
+                    pass
+
+            if not cleared:
+                try:
+                    WD_CHARACTER = 1
+                    WD_WORD = 2
+                    fallback_selection = selection.Range.Duplicate
+                    if delimiter_len:
+                        fallback_selection.MoveStart(Unit=WD_CHARACTER, Count=-delimiter_len)
+                        fallback_selection.MoveEnd(Unit=WD_CHARACTER, Count=-delimiter_len)
+                    fallback_selection.MoveStart(Unit=WD_WORD, Count=-1)
+                    try:
+                        fallback_selection.MoveStartWhile(" \t\r\n", 1)
+                    except Exception:
+                        pass
+                    try:
+                        fallback_selection.MoveEndWhile(" \t\r\n", -1)
+                    except Exception:
+                        pass
+                    if fallback_selection.Characters.Count > 0:
+                        cleared = self._reset_word_range_underlines(fallback_selection, label="prev-word fallback")
+                except Exception as fallback_exc:
+                    print(f"⚠️ Word underline selection fallback failed: {fallback_exc}")
+
+            if not cleared:
+                print(f"⚠️ Word underline cleanup fallback triggered for '{word_text}'")
+
         except Exception as exc:
             print(f"⚠️ Word underline cleanup error: {exc}")
 
@@ -2584,6 +2687,11 @@ class SmartKeyboardService:
         if not full_text:
             return
 
+        if self.current_interface == "Notepad" and self._is_notepad_document_empty():
+            print("ℹ️ Notepad document cleared before paste processing; skipping underline pass.")
+            self._clear_all_underlines_notepad_async()
+            return
+
         # Keep extending the cooldown while this batch runs to avoid keystroke overlap.
         self._start_paste_cooldown(0.8)
 
@@ -2597,6 +2705,11 @@ class SmartKeyboardService:
             try:
                 self.replacing = True
                 self.popup.hide()
+
+                if self.current_interface == "Notepad" and self._is_notepad_document_empty():
+                    print("ℹ️ Notepad document cleared during paste processing; aborting underline generation.")
+                    self._clear_all_underlines_notepad_async()
+                    return
 
                 if self.current_interface == "Microsoft Word":
                     for match in spans:
@@ -2635,6 +2748,11 @@ class SmartKeyboardService:
                 underline_offset = self._compute_underline_offset(caret_height)
 
                 for idx, match in enumerate(spans):
+                    if self.current_interface == "Notepad" and self._is_notepad_document_empty():
+                        print("ℹ️ Notepad document cleared mid-paste; stopping underline placement loop.")
+                        self._clear_all_underlines_notepad_async()
+                        return
+
                     layout_info = layout_map.get(idx)
                     if not layout_info:
                         continue
