@@ -2464,7 +2464,11 @@ class SmartKeyboardService:
             if geometry:
                 self.last_paste_anchor = geometry
 
-            before_text = self.get_document_text() or ""
+            before_text = ""
+            if self.current_interface == "Microsoft Word":
+                before_text = self._get_word_document_text() or ""
+            if not before_text:
+                before_text = self.get_document_text() or ""
             caret_index = self._get_caret_char_index()
 
             self._menu_paste_candidate = {
@@ -2509,20 +2513,37 @@ class SmartKeyboardService:
             return
 
         before_text = candidate.get('before_text') or ""
-        try:
-            after_text = self.get_document_text() or ""
-        except Exception as exc:
-            print(f"⚠️ Unable to capture document text for paste confirmation: {exc}")
-            return
+        after_text = ""
+        if self.current_interface == "Microsoft Word":
+            try:
+                after_text = self._get_word_document_text() or ""
+            except Exception as exc:
+                print(f"⚠️ Unable to capture Word document text: {exc}")
+        if not after_text:
+            try:
+                after_text = self.get_document_text() or ""
+            except Exception as exc:
+                print(f"⚠️ Unable to capture document text for paste confirmation: {exc}")
+                return
 
         if after_text == before_text:
             return
 
         inserted, removed = self._extract_inserted_segment(before_text, after_text)
-        if not inserted.strip():
-            return
 
-        words = self.extract_words_from_text(inserted)
+        clipboard_text = self.get_clipboard_text() or ""
+        if not inserted.strip():
+            if self.current_interface == "Microsoft Word" and clipboard_text.strip():
+                inserted = clipboard_text
+            if not inserted.strip():
+                return
+
+        if self.current_interface == "Microsoft Word" and clipboard_text.strip():
+            text_to_process = clipboard_text
+        else:
+            text_to_process = inserted
+
+        words = self.extract_words_from_text(text_to_process)
         if not words:
             return
 
@@ -2532,15 +2553,14 @@ class SmartKeyboardService:
         elif not self.last_paste_anchor:
             self.capture_paste_anchor()
 
-        clipboard_text = self.get_clipboard_text()
         if clipboard_text:
             self.last_clipboard_content = clipboard_text
         else:
-            self.last_clipboard_content = inserted
+            self.last_clipboard_content = text_to_process
 
         print("📋 Detected mouse paste - processing underlines")
         self._start_paste_cooldown(0.8)
-        self.process_pasted_text_for_underlines(inserted)
+        self.process_pasted_text_for_underlines(text_to_process)
 
     def _extract_inserted_segment(self, before: str, after: str) -> Tuple[str, str]:
         """Return inserted and removed substrings between two document snapshots."""
@@ -2575,6 +2595,26 @@ class SmartKeyboardService:
         inserted = after[start_after:end_after]
         removed = before[start_before:end_before]
         return inserted, removed
+
+    def _get_word_document_text(self) -> Optional[str]:
+        """Return full document text from Word via COM when available."""
+        if Dispatch is None or self.current_interface != "Microsoft Word":
+            return None
+        try:
+            word_app = Dispatch("Word.Application")
+            doc = getattr(word_app, "ActiveDocument", None)
+            if not doc:
+                return None
+            content = getattr(doc, "Content", None)
+            if not content:
+                return None
+            text = getattr(content, "Text", None)
+            if text is None:
+                return None
+            return str(text)
+        except Exception as exc:
+            print(f"⚠️ Unable to read Word document text: {exc}")
+            return None
 
     def _estimate_line_height(self, hwnd: Optional[int]) -> int:
         """Best-effort line height (pixels) for the target window."""
