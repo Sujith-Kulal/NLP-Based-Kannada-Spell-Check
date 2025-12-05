@@ -654,7 +654,7 @@ class UnderlineOverlayWindow:
         """Clear all underlines from the overlay"""
         with self.lock:
             self.underlines.clear()
-        print("🧹 Cleared all underlines")
+        print(" Cleared all underlines")
         self._run_on_ui_thread(lambda: self.canvas.delete('all'))
     
     def _draw_wavy_underline(self, x: int, y: int, width: int, color: str) -> int:
@@ -862,7 +862,7 @@ class UnderlineOverlayWindow:
                 print(f"⚠️ Error destroying overlay window: {exc}")
 
         self._run_on_ui_thread(_do_destroy)
-        print("💥 Overlay destroyed")
+        print(" Overlay destroyed")
 
 
 # ---------------------------------------------------------------------------

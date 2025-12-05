@@ -176,7 +176,7 @@ try:
     from pynput.keyboard import Key, Controller
     from pynput.mouse import Button
 except ImportError:
-    print("❌ Error: Required packages not installed")
+    print("Error: Required packages not installed")
     print("Install: pip install pywin32 pynput")
     sys.exit(1)
 
@@ -296,15 +296,15 @@ class SuggestionPopup:
 
     def get_selected(self):
         if not self.suggestions:
-            print(f"⚠️ get_selected: No suggestions available")
+            print(f"Warning: get_selected: No suggestions available")
             return None
         if not self.visible:
-            print(f"⚠️ get_selected: Popup not visible")
+            print(f"Warning: get_selected: Popup not visible")
             return None
         if self.selected < 0 or self.selected >= len(self.suggestions):
-            print(f"⚠️ get_selected: Invalid selection index {self.selected}")
+            print(f"Warning: get_selected: Invalid selection index {self.selected}")
             return None
-        print(f"✅ get_selected: Returning '{self.suggestions[self.selected]}'")
+        print(f"Success: get_selected returning '{self.suggestions[self.selected]}'")
         return self.suggestions[self.selected]
     
     def _on_click(self, event):
@@ -339,7 +339,7 @@ class SmartKeyboardService:
     """Background service for Kannada word suggestion"""
     def __init__(self):
         print("\n" + "="*70)
-        print("🎯 Kannada Smart Keyboard Service - Suggestion Mode")
+        print("Kannada Smart Keyboard Service - Suggestion Mode")
         print("="*70)
         
         self.spell_checker = EnhancedSpellChecker()
@@ -420,16 +420,16 @@ class SmartKeyboardService:
         self.paste_default_line_offset_px = self.dpi.px(-18)  # Fallback shift for any additional lines
         self.paste_line_offset_increment_px = self.dpi.px(4)  # Push lower lines down a touch
 
-        print("\n✅ Smart Keyboard Service initialized!")
-        print("\n📝 Controls:")
+        print("\nSmart Keyboard Service initialized!")
+        print("\nControls:")
         print("   Ctrl+Shift+K : Toggle suggestions ON/OFF")
         print("   ↑ / ↓        : Navigate suggestions")
         print("   Enter / Click: Replace word with selected suggestion")
         print("   Esc (popup)  : Hide suggestions")
         print("   Esc (twice)  : Stop the service")
-        print("\n🚀 Service running... Type or paste Kannada text in any app to see suggestions!")
+        print("\nService running... Type or paste Kannada text in any app to see suggestions!")
         print("="*70 + "\n")
-        print("💡 TIP: Press Esc twice quickly to stop the service cleanly")
+        print("TIP: Press Esc twice quickly to stop the service cleanly")
 
         # Track the active interface (Notepad, Word, etc.)
         self.current_interface = None
@@ -482,7 +482,7 @@ class SmartKeyboardService:
         if not after:
             # Only remove underline if the deleted word was actually a Kannada word
             if before and any(self.is_kannada_char(c) for c in before):
-                print(f"🔍 Removing underline for deleted Kannada word '{before}'")
+                print(f"Removing underline for deleted Kannada word '{before}'")
                 caret_index = self._get_caret_char_index()
                 fallback_index = None
                 if caret_index is not None and len(before) > 1:
@@ -497,7 +497,7 @@ class SmartKeyboardService:
             if self.last_committed_word_chars:
                 last_word = ''.join(self.last_committed_word_chars).strip()
                 if last_word and any(self.is_kannada_char(c) for c in last_word):
-                    print(f"🔍 Removing underline for deleted Kannada word '{last_word}' (from last_committed)")
+                    print(f"Removing underline for deleted Kannada word '{last_word}' (from last_committed)")
                     caret_index = self._get_caret_char_index()
                     fallback_index = None
                     if caret_index is not None and len(last_word) > 1:
@@ -608,20 +608,20 @@ class SmartKeyboardService:
         if best_candidate:
             candidate, word = best_candidate
             if self.remove_persistent_underline(uid=candidate):
-                print(f"🧽 Cleared underline id={candidate} near caret for '{word}'")
+                print(f"Cleared underline id={candidate} near caret for '{word}'")
                 return True
 
         return False
 
     def _clear_all_underlines_notepad(self):
         """Clear all persistent underlines when Ctrl+A + Backspace/Delete is used in Notepad."""
-        print(f"🧹 Clearing all {len(self.misspelled_words)} underlines after select-all delete...")
+        print(f"Clearing all {len(self.misspelled_words)} underlines after select-all delete...")
         
         # Clear overlay canvas
         try:
             self.underline_overlay.clear_all_underlines()
         except Exception as e:
-            print(f"⚠️ Error clearing overlay: {e}")
+            print(f"Error clearing overlay: {e}")
         
         # Clear tracking dictionary
         with self.underline_lock:
@@ -640,7 +640,7 @@ class SmartKeyboardService:
         
         self._hide_overlay_temporarily()
 
-        print("✅ All underlines cleared")
+        print("All underlines cleared")
 
     def _clear_all_underlines_notepad_async(self):
         """Schedule a safe underline clear on the Tk thread when we detect empty content."""
@@ -677,30 +677,30 @@ class SmartKeyboardService:
                 selection_start, selection_end = selection_end, selection_start
 
             if selection_end <= selection_start:
-                print(f"ℹ️ Select-all check: start={selection_start}, end={selection_end}, length={text_length} → no selection")
+                print(f"Select-all check: start={selection_start}, end={selection_end}, length={text_length} -> no selection")
                 return False
 
             if text_length <= 0:
-                print(f"ℹ️ Select-all check: empty document (length={text_length})")
+                print(f"Select-all check: empty document (length={text_length})")
                 return False
 
             # Require selection from document start and covering (nearly) entire content
             if selection_start != 0:
-                print(f"ℹ️ Select-all check: selection does not start at 0 (start={selection_start})")
+                print(f"Select-all check: selection does not start at 0 (start={selection_start})")
                 return False
 
             if selection_end >= text_length:
-                print(f"ℹ️ Select-all check: full selection detected (length={text_length})")
+                print(f"Select-all check: full selection detected (length={text_length})")
                 return True
 
             # Some editors omit the final newline from the selection length; allow off-by-one in that case
             almost_full = text_length > 0 and (selection_end + 1) >= text_length
             print(
-                f"ℹ️ Select-all check: nearly full={almost_full} (end={selection_end}, length={text_length})"
+                f"Select-all check: nearly full={almost_full} (end={selection_end}, length={text_length})"
             )
             return almost_full
         except Exception as exc:
-            print(f"⚠️ Full-selection detection failed: {exc}")
+            print(f"Full-selection detection failed: {exc}")
             return False
 
     def _should_clear_select_all(self) -> bool:
@@ -709,7 +709,7 @@ class SmartKeyboardService:
             return True
         detected = self._has_full_document_selection()
         if detected:
-            print("ℹ️ Select-all detected via foreground selection")
+            print("Select-all detected via foreground selection")
         return detected
 
     def _get_notepad_edit_hwnd(self) -> Optional[int]:
@@ -731,7 +731,7 @@ class SmartKeyboardService:
             if child:
                 return child
         except Exception as exc:
-            print(f"⚠️ Failed to resolve Notepad edit control: {exc}")
+            print(f"Failed to resolve Notepad edit control: {exc}")
         return None
 
     def _get_notepad_text_length(self) -> Optional[int]:
@@ -747,7 +747,7 @@ class SmartKeyboardService:
             length = windll.user32.SendMessageW(edit_hwnd, win32con.WM_GETTEXTLENGTH, 0, 0)
             return int(length)
         except Exception as exc:
-            print(f"⚠️ Failed to query Notepad text length: {exc}")
+            print(f"Failed to query Notepad text length: {exc}")
             return None
 
     def _is_notepad_document_empty(self) -> bool:
@@ -837,7 +837,7 @@ class SmartKeyboardService:
             return
 
         if length == 0 and self.misspelled_words:
-            print("🧹 Notepad document is empty after deletion - clearing underlines")
+            print("Notepad document is empty after deletion - clearing underlines")
             self.select_all_active = False
             # Run on Tk thread to avoid cross-thread canvas calls
             try:
@@ -878,7 +878,7 @@ class SmartKeyboardService:
             self.underline_overlay.show(hwnd)
             self.active_overlay_hwnd = hwnd
         except Exception as exc:
-            print(f"⚠️ Failed to show overlay for hwnd {hwnd}: {exc}")
+            print(f"Failed to show overlay for hwnd {hwnd}: {exc}")
 
     def _hide_overlay_temporarily(self):
         self.active_overlay_hwnd = None
@@ -887,7 +887,7 @@ class SmartKeyboardService:
         try:
             self.underline_overlay.hide()
         except Exception as exc:
-            print(f"⚠️ Failed to hide overlay: {exc}")
+            print(f"Failed to hide overlay: {exc}")
 
     def _handle_interface_switch(
         self,
@@ -968,10 +968,10 @@ class SmartKeyboardService:
                     last_hwnd = hwnd
                     self.current_interface = interface
                     if interface:
-                        print(f"🪟 Active interface detected: {interface}", flush=True)
+                        print(f"Active interface detected: {interface}", flush=True)
                     self._handle_interface_switch(previous_interface, interface, previous_hwnd, hwnd)
             except Exception as exc:
-                print(f"⚠️ Interface detection error: {exc}")
+                print(f"Interface detection error: {exc}")
                 time.sleep(1.5)
             else:
                 time.sleep(0.5)
@@ -1155,15 +1155,16 @@ class SmartKeyboardService:
                     hwnd=hwnd,
                 )
 
+            prefix = "INFO" if has_suggestions else "ERROR"
             print(
-                f"{'🟠' if has_suggestions else '🔴'} Added persistent underline for "
+                f"{prefix} Added persistent underline for "
                 f"'{word}' (id={uid}) - Total misspelled: {total}"
             )
 
             return uid
 
         except Exception as exc:
-            print(f"⚠️ Failed to add persistent underline for '{word}': {exc}")
+            print(f"Failed to add persistent underline for '{word}': {exc}")
             return None
     
     def remove_persistent_underline(
@@ -1301,11 +1302,11 @@ class SmartKeyboardService:
             remaining = len(self.misspelled_words)
             target_desc = uid or word
             print(
-                f"✅ Removed {removed_count} underline(s) for '{target_desc}' - Remaining: {remaining}"
+                f"Removed {removed_count} underline(s) for '{target_desc}' - Remaining: {remaining}"
             )
         if failed:
             for candidate, reason in failed:
-                print(f"⚠️ Failed to remove overlay underline {candidate}: {reason}")
+                print(f"Failed to remove overlay underline {candidate}: {reason}")
 
         with self.underline_lock:
             no_underlines_remaining = not self.misspelled_words
@@ -1359,7 +1360,7 @@ class SmartKeyboardService:
             try:
                 self._refresh_underlines_geometry(reason=reason)
             except Exception as exc:
-                print(f"⚠️ Underline refresh failed ({reason or 'unspecified'}): {exc}")
+                print(f"Underline refresh failed ({reason or 'unspecified'}): {exc}")
             finally:
                 with self.underline_lock:
                     self._refresh_scheduled = False
@@ -1614,7 +1615,7 @@ class SmartKeyboardService:
             }
 
         except Exception as exc:
-            print(f"⚠️ Unable to recompute geometry for '{word}': {exc}")
+            print(f"Unable to recompute geometry for '{word}': {exc}")
             return None
     
     def on_mouse_click(self, x, y, button, pressed):
@@ -1682,7 +1683,7 @@ class SmartKeyboardService:
                 
                 # User clicked on this underlined word!
                 suggestions = info['suggestions']
-                print(f"🖱️ Clicked on underlined word '{word}' - showing suggestions")
+                print(f"Clicked on underlined word '{word}' - showing suggestions")
                 
                 if suggestions:
                     self.last_underline_id = uid
@@ -1694,11 +1695,11 @@ class SmartKeyboardService:
                     except Exception:
                         current_hwnd = None
                     if target_hwnd and current_hwnd and not self._window_handles_match(target_hwnd, current_hwnd):
-                        print("ℹ️ Ignoring click: interface switched during click")
+                        print("Ignoring click: interface switched during click")
                         return
                     self.popup.show(suggestions)
                 else:
-                    print(f"⚠️ No suggestions available for '{word}'")
+                    print(f"No suggestions available for '{word}'")
                 break
 
     def _handle_word_click(self) -> None:
@@ -1935,7 +1936,7 @@ class SmartKeyboardService:
                 draw_overlay=not is_word_app,
             )
         except Exception as exc:
-            print(f"⚠️ Unable to underline word '{word}': {exc}")
+            print(f"Unable to underline word '{word}': {exc}")
             underline_id = None
 
         if is_word_app:
@@ -1956,23 +1957,23 @@ class SmartKeyboardService:
     ) -> Optional[str]:
         """Drive Microsoft Word's native wavy underline via COM automation."""
         if Dispatch is None:
-            print("⚠️ Word COM automation unavailable (win32com not installed)")
+            print("Word COM automation unavailable (win32com not installed)")
             return None
 
         try:
             word_app = Dispatch("Word.Application")
         except Exception as exc:
-            print(f"⚠️ Unable to attach to Word: {exc}")
+            print(f"Unable to attach to Word: {exc}")
             return None
 
         try:
             doc = word_app.ActiveDocument
         except Exception as exc:
-            print(f"⚠️ Word automation error (ActiveDocument): {exc}")
+            print(f"Word automation error (ActiveDocument): {exc}")
             return None
 
         if doc is None:
-            print("⚠️ No active Word document detected")
+            print("No active Word document detected")
             return None
 
         try:
@@ -1986,7 +1987,7 @@ class SmartKeyboardService:
             find.Wrap = 0  # wdFindStop
 
             found = 0
-            marker = "🟠" if has_suggestions else "🔴"
+            marker = "INFO" if has_suggestions else "ERROR"
             underline_style = 11  # wdUnderlineWavy
             underline_color = 26367 if has_suggestions else 255  # Orange / Red (WdColor)
 
@@ -2033,11 +2034,11 @@ class SmartKeyboardService:
                 print(f"{marker} Word underline applied for '{word}' ({found} occurrence{'s' if found != 1 else ''})")
                 return f"word-com-{uuid.uuid4().hex[:6]}"
 
-            print(f"⚠️ Word underline: '{word}' not found in active document")
+            print(f"Word underline: '{word}' not found in active document")
             return None
 
         except Exception as exc:
-            print(f"⚠️ Word underline failed for '{word}': {exc}")
+            print(f"Word underline failed for '{word}': {exc}")
             return None
 
     def _reset_word_range_underlines(self, target_range, *, label: Optional[str] = None) -> bool:
@@ -2053,10 +2054,10 @@ class SmartKeyboardService:
             if label:
                 cleaned = (target_range.Text or "").strip()
                 if cleaned:
-                    print(f"🧼 Cleared Word underline for '{cleaned}' ({label})")
+                    print(f"Cleared Word underline for '{cleaned}' ({label})")
             return True
         except Exception as exc:
-            print(f"⚠️ Failed to clear Word underline{f' ({label})' if label else ''}: {exc}")
+            print(f"Failed to clear Word underline{f' ({label})' if label else ''}: {exc}")
             return False
 
     def _clear_word_underline_for_replacement(self, word_text: str, delimiter: str):
@@ -2071,7 +2072,7 @@ class SmartKeyboardService:
         try:
             word_app = Dispatch("Word.Application")
         except Exception as exc:
-            print(f"⚠️ Unable to attach to Word for underline clear: {exc}")
+            print(f"Unable to attach to Word for underline clear: {exc}")
             return
 
         try:
@@ -2162,13 +2163,13 @@ class SmartKeyboardService:
                     if fallback_selection.Characters.Count > 0:
                         cleared = self._reset_word_range_underlines(fallback_selection, label="prev-word fallback")
                 except Exception as fallback_exc:
-                    print(f"⚠️ Word underline selection fallback failed: {fallback_exc}")
+                    print(f"Word underline selection fallback failed: {fallback_exc}")
 
             if not cleared:
-                print(f"⚠️ Word underline cleanup fallback triggered for '{word_text}'")
+                print(f"Word underline cleanup fallback triggered for '{word_text}'")
 
         except Exception as exc:
-            print(f"⚠️ Word underline cleanup error: {exc}")
+            print(f"Word underline cleanup error: {exc}")
 
     def _cleanup_word_whitespace_after_space(self):
         """Ensure a newly inserted space near a misspelled Word keeps underlines separate."""
@@ -2231,7 +2232,7 @@ class SmartKeyboardService:
             except Exception:
                 pass
         except Exception as exc:
-            print(f"⚠️ Word whitespace cleanup failed: {exc}")
+            print(f"Word whitespace cleanup failed: {exc}")
     
     def get_clipboard_text(self):
         """Get text from clipboard safely"""
@@ -2259,7 +2260,7 @@ class SmartKeyboardService:
                 focus = gui_info.hwndFocus or gui_info.hwndCaret or foreground
                 return foreground, focus
         except Exception as exc:
-            print(f"⚠️ Focus handle lookup failed: {exc}")
+            print(f"Focus handle lookup failed: {exc}")
         return None, None
 
     def _get_text_via_win32(self, hwnd: Optional[int]) -> Optional[str]:
@@ -2300,10 +2301,10 @@ class SmartKeyboardService:
             if text:
                 return text
             
-            print("⚠️ Unable to capture document text without keystrokes; skipping full scan.")
+            print("Unable to capture document text without keystrokes; skipping full scan.")
             return ""
         except Exception as exc:
-            print(f"⚠️ Error getting document text: {exc}")
+            print(f"Error getting document text: {exc}")
             return ""
     
     def check_all_words_from_start_to_end(self):
@@ -2328,7 +2329,7 @@ class SmartKeyboardService:
                 if any(self.is_kannada_char(c) for c in word) and len(word) >= 2:
                     kannada_words.append((word, position))
             
-            print(f"📝 Checking {len(kannada_words)} words from start to end...")
+            print(f"Checking {len(kannada_words)} words from start to end...")
             
             # Clear old document_words and rebuild
             with self.document_lock:
@@ -2359,11 +2360,11 @@ class SmartKeyboardService:
                         # The underline will be added when we process each word individually
                         pass
             
-            print(f"✅ Document dictionary updated: {len(self.document_words)} words tracked")
+            print(f"Document dictionary updated: {len(self.document_words)} words tracked")
             print(f"   Errors found: {sum(1 for w in self.document_words.values() if w['has_error'])}")
             
         except Exception as exc:
-            print(f"❌ Error checking all words: {exc}")
+            print(f"Error checking all words: {exc}")
             import traceback
             traceback.print_exc()
     
@@ -2378,7 +2379,7 @@ class SmartKeyboardService:
                     suggestions, had_error = self.get_suggestions(new_word)
                     word_data['suggestions'] = suggestions
                     word_data['has_error'] = had_error
-                    print(f"📝 Updated document word {word_index}: '{old_word}' → '{new_word}'")
+                    print(f"Updated document word {word_index}: '{old_word}' -> '{new_word}'")
                     break
 
     def _capture_live_geometry(self) -> Optional[dict]:
@@ -2477,9 +2478,9 @@ class SmartKeyboardService:
                 'caret_index': caret_index,
                 'geometry': geometry,
             }
-            print("🖱️ Context menu snapshot captured for paste candidate")
+            print("Context menu snapshot captured for paste candidate")
         except Exception as exc:
-            print(f"⚠️ Unable to prepare mouse paste snapshot: {exc}")
+            print(f"Unable to prepare mouse paste snapshot: {exc}")
             self._menu_paste_candidate = None
 
     def _maybe_trigger_mouse_paste_check(self):
@@ -2518,12 +2519,12 @@ class SmartKeyboardService:
             try:
                 after_text = self._get_word_document_text() or ""
             except Exception as exc:
-                print(f"⚠️ Unable to capture Word document text: {exc}")
+                print(f"Unable to capture Word document text: {exc}")
         if not after_text:
             try:
                 after_text = self.get_document_text() or ""
             except Exception as exc:
-                print(f"⚠️ Unable to capture document text for paste confirmation: {exc}")
+                print(f"Unable to capture document text for paste confirmation: {exc}")
                 return
 
         if after_text == before_text:
@@ -2558,7 +2559,7 @@ class SmartKeyboardService:
         else:
             self.last_clipboard_content = text_to_process
 
-        print("📋 Detected mouse paste - processing underlines")
+        print("Detected mouse paste - processing underlines")
         self._start_paste_cooldown(0.8)
         self.process_pasted_text_for_underlines(text_to_process)
 
@@ -2613,7 +2614,7 @@ class SmartKeyboardService:
                 return None
             return str(text)
         except Exception as exc:
-            print(f"⚠️ Unable to read Word document text: {exc}")
+            print(f"Unable to read Word document text: {exc}")
             return None
 
     def _estimate_line_height(self, hwnd: Optional[int]) -> int:
@@ -2855,7 +2856,7 @@ class SmartKeyboardService:
             return
 
         if self.current_interface == "Notepad" and self._is_notepad_document_empty():
-            print("ℹ️ Notepad document cleared before paste processing; skipping underline pass.")
+            print("Notepad document cleared before paste processing; skipping underline pass.")
             self._clear_all_underlines_notepad_async()
             return
 
@@ -2874,7 +2875,7 @@ class SmartKeyboardService:
                 self.popup.hide()
 
                 if self.current_interface == "Notepad" and self._is_notepad_document_empty():
-                    print("ℹ️ Notepad document cleared during paste processing; aborting underline generation.")
+                    print("Notepad document cleared during paste processing; aborting underline generation.")
                     self._clear_all_underlines_notepad_async()
                     return
 
@@ -2897,7 +2898,7 @@ class SmartKeyboardService:
 
                 geometry = geometry_snapshot or self._resolve_paste_anchor_geometry()
                 if not geometry:
-                    print("⚠️ Unable to resolve paste geometry; skipping underline placement.")
+                    print("Unable to resolve paste geometry; skipping underline placement.")
                     return
 
                 target_hwnd = geometry['hwnd']
@@ -2907,7 +2908,7 @@ class SmartKeyboardService:
                 selection_start = geometry.get('selection_start')
                 layout_map = self._build_notepad_layout(full_text, spans, geometry)
                 if not layout_map:
-                    print("⚠️ Unable to rebuild Notepad layout; skipping paste underlines.")
+                    print("Unable to rebuild Notepad layout; skipping paste underlines.")
                     return
                 caret_height = self._get_caret_height(target_hwnd)
                 if caret_height is None:
@@ -2916,7 +2917,7 @@ class SmartKeyboardService:
 
                 for idx, match in enumerate(spans):
                     if self.current_interface == "Notepad" and self._is_notepad_document_empty():
-                        print("ℹ️ Notepad document cleared mid-paste; stopping underline placement loop.")
+                        print("Notepad document cleared mid-paste; stopping underline placement loop.")
                         self._clear_all_underlines_notepad_async()
                         return
 
@@ -2967,7 +2968,7 @@ class SmartKeyboardService:
                     )
 
             except Exception as exc:
-                print(f"❌ Error processing pasted words for underlines: {exc}")
+                print(f"Error processing pasted words for underlines: {exc}")
                 import traceback
                 traceback.print_exc()
             finally:
@@ -2982,10 +2983,10 @@ class SmartKeyboardService:
         """Entry point invoked after Ctrl+V settles; runs the one-shot paste pass."""
         try:
             clipboard_text = self.get_clipboard_text()
-            print(f"🔍 Clipboard content: {repr(clipboard_text)}")
+            print(f"Clipboard content: {repr(clipboard_text)}")
             
             if not clipboard_text:
-                print("⚠️ No clipboard text found")
+                print("No clipboard text found")
                 return
                 
             # Always update clipboard content
@@ -2993,14 +2994,14 @@ class SmartKeyboardService:
             
             # Extract Kannada words from pasted text
             words = self.extract_words_from_text(clipboard_text)
-            print(f"🔍 Extracted Kannada words: {words}")
+            print(f"Extracted Kannada words: {words}")
             
             if words and self.enabled and not self.replacing:
                 self.process_pasted_text_for_underlines(clipboard_text)
             else:
-                print(f"⚠️ No Kannada words found or service disabled")
+                print(f"No Kannada words found or service disabled")
         except Exception as e:
-            print(f"❌ Error checking pasted text: {e}")
+            print(f"Error checking pasted text: {e}")
             import traceback
             traceback.print_exc()
     
@@ -3026,7 +3027,7 @@ class SmartKeyboardService:
     
     def replace_word(self, chosen_word):
         """Replace the misspelled word with chosen suggestion"""
-        print(f"✅ Replacing with: '{chosen_word}'")
+        print(f"Replacing with: '{chosen_word}'")
         pivot_info = None
         with self.underline_lock:
             if self.last_underline_id and self.last_underline_id in self.misspelled_words:
@@ -3086,7 +3087,7 @@ class SmartKeyboardService:
             # Wait longer before resetting flag to ensure space is fully processed
             time.sleep(0.15)
 
-            print("✅ Replacement complete")
+            print("Replacement complete")
 
             delta_chars = len(chosen_word) - previous_length
             if delta_chars and pivot_index is not None:
@@ -3138,7 +3139,7 @@ class SmartKeyboardService:
             ).start()
 
         except Exception as e:
-            print(f"⚠️ Replacement failed: {e}")
+            print(f"Replacement failed: {e}")
             self.just_replaced_word = False
             self.last_underline_id = None
         finally:
@@ -3149,7 +3150,7 @@ class SmartKeyboardService:
         """Handle key press events"""
         try:
             # Debug: print every key press
-            print(f"🔑 Key pressed: {key}, ctrl_held={getattr(self, 'ctrl_held', False)}, select_all_active={getattr(self, 'select_all_active', False)}")
+            print(f"Key pressed: {key}, ctrl_held={getattr(self, 'ctrl_held', False)}, select_all_active={getattr(self, 'select_all_active', False)}")
             
             # Skip processing if we're in the middle of replacing
             if self.replacing:
@@ -3174,7 +3175,7 @@ class SmartKeyboardService:
             if key == Key.ctrl_l or key == Key.ctrl_r:
                 self.clipboard_check_active = True
                 self.ctrl_held = True
-                print(f"🎛️ Ctrl pressed - ctrl_held set to True")
+                print(f"Ctrl pressed - ctrl_held set to True")
             
             # Check for 'A' or 'V' key while Ctrl is held
             if self.ctrl_held:
@@ -3197,7 +3198,7 @@ class SmartKeyboardService:
                 except:
                     pass
                 
-                print(f"🔍 Checking key while Ctrl held: char={key_char}, vk={key_vk}, name={key_name}")
+                print(f"Checking key while Ctrl held: char={key_char}, vk={key_vk}, name={key_name}")
                 
                 if key_char == 'v' or key_vk == 86 or (key_name and 'v' in key_name):
                     is_v_key = True
@@ -3209,13 +3210,13 @@ class SmartKeyboardService:
                     in_paste_cooldown = True
                     self.capture_paste_anchor()
                     # Ctrl+V detected - schedule clipboard check after paste completes
-                    print("📋 Paste detected - checking clipboard...")
+                    print("Paste detected - checking clipboard...")
                     threading.Timer(0.3, self.check_pasted_text).start()
                 
                 if is_a_key:
                     # Ctrl+A detected - mark select-all active
                     self.select_all_active = True
-                    print(f"📋 Ctrl+A detected - select all active (interface: {self.current_interface})")
+                    print(f"Ctrl+A detected - select all active (interface: {self.current_interface})")
             
             if key in (Key.backspace, Key.esc) and self.just_replaced_word:
                 self.just_replaced_word = False
@@ -3229,7 +3230,7 @@ class SmartKeyboardService:
                 current_time = time.time()
                 # if second Esc within threshold -> stop service
                 if current_time - self.last_esc_time < 1.0:
-                    print("\n🛑 Esc pressed twice - Stopping service...")
+                    print("\nEsc pressed twice - Stopping service...")
                     self.running = False
                     try:
                         self.popup.hide()
@@ -3260,14 +3261,14 @@ class SmartKeyboardService:
                     self.popup.select_prev()
                     return
                 elif key == Key.enter:
-                    print("🔍 Enter pressed - popup visible")
+                    print("Enter pressed - popup visible")
                     chosen = self.popup.get_selected()
-                    print(f"🔍 Selected suggestion: {chosen}")
+                    print(f"Selected suggestion: {chosen}")
                     if chosen:
                         self.popup.hide()
                         self.replace_word(chosen)
                     else:
-                        print("⚠️ No suggestion selected")
+                        print("No suggestion selected")
                     return
 
             # Buffer-aware editing controls (apply whether popup is visible or not)
@@ -3275,7 +3276,7 @@ class SmartKeyboardService:
                 triggered_via_ctrl = self.select_all_active
                 if self._should_clear_select_all():
                     reason = "Ctrl+A" if triggered_via_ctrl else "Selection"
-                    print(f"🧹 {reason} + Backspace detected - clearing all underlines (interface: {self.current_interface})")
+                    print(f"{reason} + Backspace detected - clearing all underlines (interface: {self.current_interface})")
                     self._clear_all_underlines_notepad()
                     self.select_all_active = False
                     self.reset_current_word()
@@ -3287,7 +3288,7 @@ class SmartKeyboardService:
                 if self.trailing_delimiter_count > 0:
                     self.trailing_delimiter_count = max(0, self.trailing_delimiter_count - 1)
                     self.pending_restore = False
-                    print(f"⬅️ Removed trailing delimiter (remaining: {self.trailing_delimiter_count})")
+                    print(f"Removed trailing delimiter (remaining: {self.trailing_delimiter_count})")
                     if (self.trailing_delimiter_count == 0 and not self.current_word_chars
                             and self.last_committed_word_chars and self.restore_allowed):
                         self.current_word_chars = self.last_committed_word_chars.copy()
@@ -3296,7 +3297,7 @@ class SmartKeyboardService:
                         self.restore_allowed = False
                         # Update buffer_before_edit to reflect the restored word
                         buffer_before_edit = ''.join(self.current_word_chars)
-                        print(f"🔄 Restored last word buffer '{buffer_before_edit}' before backspace")
+                        print(f"Restored last word buffer '{buffer_before_edit}' before backspace")
                     return
                 removal_checked = False
                 if self.pending_restore:
@@ -3310,14 +3311,14 @@ class SmartKeyboardService:
                         removed = ''.join(self.current_word_chars[start:end])
                         del self.current_word_chars[start:end]
                         self.cursor_index = start
-                        print(f"⌫ Backspace cleared selection '{removed}' → Buffer: {''.join(self.current_word_chars)} (cursor @ {self.cursor_index})")
+                        print(f"Backspace cleared selection '{removed}' -> Buffer: {''.join(self.current_word_chars)} (cursor @ {self.cursor_index})")
                         self.selection_range = None
                         self.selection_anchor = None
                         self.sync_committed_buffer()
                     elif self.cursor_index > 0:
                         removed_char = self.current_word_chars.pop(self.cursor_index - 1)
                         self.cursor_index -= 1
-                        print(f"⌫ Backspace removed '{removed_char}' → Buffer: {''.join(self.current_word_chars)} (cursor @ {self.cursor_index})")
+                        print(f"Backspace removed '{removed_char}' -> Buffer: {''.join(self.current_word_chars)} (cursor @ {self.cursor_index})")
                         self.sync_committed_buffer()
                     else:
                         self.reset_current_word()
@@ -3328,7 +3329,7 @@ class SmartKeyboardService:
                     removed = ''.join(self.current_word_chars[start:end])
                     del self.current_word_chars[start:end]
                     self.cursor_index = start
-                    print(f"⌫ Backspace cleared selection '{removed}' → Buffer: {''.join(self.current_word_chars)} (cursor @ {self.cursor_index})")
+                    print(f"Backspace cleared selection '{removed}' -> Buffer: {''.join(self.current_word_chars)} (cursor @ {self.cursor_index})")
                     self.selection_range = None
                     self.selection_anchor = None
                     self.sync_committed_buffer()
@@ -3337,7 +3338,7 @@ class SmartKeyboardService:
                     self.restore_allowed = False
                     removed_char = self.current_word_chars.pop(self.cursor_index - 1)
                     self.cursor_index -= 1
-                    print(f"⌫ Backspace removed '{removed_char}' → Buffer: {''.join(self.current_word_chars)} (cursor @ {self.cursor_index})")
+                    print(f"Backspace removed '{removed_char}' -> Buffer: {''.join(self.current_word_chars)} (cursor @ {self.cursor_index})")
                     self.sync_committed_buffer()
                     removal_checked = True
                 elif not self.current_word_chars and self.last_committed_word_chars and self.restore_allowed:
@@ -3346,7 +3347,7 @@ class SmartKeyboardService:
                     self.cursor_index = len(self.current_word_chars)
                     self.pending_restore = True
                     self.restore_allowed = False
-                    print(f"🔄 Restored last word buffer '{''.join(self.current_word_chars)}' before backspace")
+                    print(f"Restored last word buffer '{''.join(self.current_word_chars)}' before backspace")
                     return
                 else:
                     self.reset_current_word()
@@ -3367,7 +3368,7 @@ class SmartKeyboardService:
                 triggered_via_ctrl = self.select_all_active
                 if self._should_clear_select_all():
                     reason = "Ctrl+A" if triggered_via_ctrl else "Selection"
-                    print(f"🧹 {reason} + Delete detected - clearing all underlines (interface: {self.current_interface})")
+                    print(f"{reason} + Delete detected - clearing all underlines (interface: {self.current_interface})")
                     self._clear_all_underlines_notepad()
                     self.select_all_active = False
                     self.reset_current_word()
@@ -3384,18 +3385,18 @@ class SmartKeyboardService:
                     removed = ''.join(self.current_word_chars[start:end])
                     del self.current_word_chars[start:end]
                     self.cursor_index = start
-                    print(f"⌦ Delete cleared selection '{removed}' → Buffer: {''.join(self.current_word_chars)} (cursor @ {self.cursor_index})")
+                    print(f"Delete cleared selection '{removed}' -> Buffer: {''.join(self.current_word_chars)} (cursor @ {self.cursor_index})")
                     self.selection_range = None
                     self.selection_anchor = None
                     removal_checked = True
                 elif self.cursor_index < len(self.current_word_chars):
                     self.restore_allowed = False
                     removed_char = self.current_word_chars.pop(self.cursor_index)
-                    print(f"⌦ Delete removed '{removed_char}' → Buffer: {''.join(self.current_word_chars)} (cursor @ {self.cursor_index})")
+                    print(f"Delete removed '{removed_char}' -> Buffer: {''.join(self.current_word_chars)} (cursor @ {self.cursor_index})")
                     removal_checked = True
                 elif self.trailing_delimiter_count > 0:
                     self.trailing_delimiter_count = max(0, self.trailing_delimiter_count - 1)
-                    print(f"⌦ Consumed trailing delimiter with Delete (remaining: {self.trailing_delimiter_count})")
+                    print(f"Consumed trailing delimiter with Delete (remaining: {self.trailing_delimiter_count})")
                 else:
                     # Nothing to delete in buffer; ensure we don't leave stale underline when buffer already empty
                     removal_checked = True
@@ -3423,11 +3424,11 @@ class SmartKeyboardService:
                     start = min(self.cursor_index, self.selection_anchor)
                     end = max(self.cursor_index, self.selection_anchor)
                     self.selection_range = (start, end)
-                    print(f"◀️ Selection range {self.selection_range}")
+                    print(f"Selection range {self.selection_range}")
                 else:
                     self.selection_anchor = None
                     self.selection_range = None
-                    print(f"◀️ Cursor moved left → index {self.cursor_index}")
+                    print(f"Cursor moved left -> index {self.cursor_index}")
                 return
 
             if key == Key.right:
@@ -3442,11 +3443,11 @@ class SmartKeyboardService:
                     start = min(self.cursor_index, self.selection_anchor)
                     end = max(self.cursor_index, self.selection_anchor)
                     self.selection_range = (start, end)
-                    print(f"▶️ Selection range {self.selection_range}")
+                    print(f"Selection range {self.selection_range}")
                 else:
                     self.selection_anchor = None
                     self.selection_range = None
-                    print(f"▶️ Cursor moved right → index {self.cursor_index}")
+                    print(f"Cursor moved right -> index {self.cursor_index}")
                 return
 
             if key in [Key.up, Key.down, Key.home, Key.end, Key.page_up, Key.page_down]:
@@ -3477,22 +3478,22 @@ class SmartKeyboardService:
                 self.pending_restore = False
                 self.last_delimiter_char = char
                 self.trailing_delimiter_count += 1
-                # ✅ ALWAYS check and hide popup, even if word is empty
+                # Always check and hide popup, even if word is empty
                 word = ''.join(self.current_word_chars) if self.current_word_chars else ""
                 if self.current_word_chars:
                     self.last_committed_word_chars = self.current_word_chars.copy()
 
                 if self.current_word_chars and self.enabled and not self.replacing:
-                    print(f"🔍 Buffer at delimiter: {self.current_word_chars} (cursor @ {self.cursor_index}) → Word: '{word}'")
+                    print(f"Buffer at delimiter: {self.current_word_chars} (cursor @ {self.cursor_index}) -> Word: '{word}'")
 
                     if in_paste_cooldown:
-                        print("⏸️ Skipping keystroke-based check during paste cooldown")
+                        print("Skipping keystroke-based check during paste cooldown")
                         self.popup.hide()
                     else:
                         # Check if this is the word we just replaced (within 0.5 seconds)
                         time_since_replacement = time.time() - self.last_replacement_time
                         if word == self.last_replaced_word and time_since_replacement < 0.5:
-                            print(f"⏭️ Skipping check - just replaced this word")
+                            print(f"Skipping check - just replaced this word")
                             self.popup.hide()
                             self.last_replaced_word = ""  # Clear it
                         else:
@@ -3529,7 +3530,7 @@ class SmartKeyboardService:
                                 )
                                 self.popup.hide()
                 else:
-                    # ✅ Hide popup if no word was typed (multiple spaces, etc.)
+                    # Hide popup if no word was typed (multiple spaces, etc.)
                     self.popup.hide()
                 # Always clear buffer after delimiter
                 self.reset_current_word(preserve_delimiter=True, clear_marker=False)
@@ -3541,7 +3542,7 @@ class SmartKeyboardService:
             elif char:
                 self.pending_restore = False
                 self.restore_allowed = False
-                # ✅ Hide popup while actively typing a new word
+                # Hide popup while actively typing a new word
                 if self.popup.visible:
                     self.popup.hide()
                 if self.selection_range:
@@ -3549,7 +3550,7 @@ class SmartKeyboardService:
                     removed = ''.join(self.current_word_chars[start:end])
                     del self.current_word_chars[start:end]
                     self.cursor_index = start
-                    print(f"✏️ Replacing selection '{removed}' before inserting '{char}'")
+                    print(f"Replacing selection '{removed}' before inserting '{char}'")
                     self.selection_range = None
                     self.selection_anchor = None
                 self.current_word_chars.insert(self.cursor_index, char)
@@ -3565,7 +3566,7 @@ class SmartKeyboardService:
                     # Clear selection state after normal typing
                     self.selection_anchor = None
                     self.selection_range = None
-                print(f"⌨️ Typed '{char}' → Buffer: {''.join(self.current_word_chars)} (cursor @ {self.cursor_index})")
+                print(f"Typed '{char}' -> Buffer: {''.join(self.current_word_chars)} (cursor @ {self.cursor_index})")
                 self._schedule_refresh_if_needed("typing-insert")
         except Exception:
             pass
@@ -3584,15 +3585,15 @@ class SmartKeyboardService:
     def toggle_enabled(self):
         """Toggle suggestion mode"""
         self.enabled = not self.enabled
-        status = "ENABLED ✅" if self.enabled else "DISABLED ⛔"
-        print(f"\n🔄 Suggestion mode {status}")
+        status = "ENABLED" if self.enabled else "DISABLED"
+        print(f"\nSuggestion mode {status}")
         if not self.enabled:
             self.popup.hide()
     
     def on_popup_close(self):
         """Handle popup window close"""
         self.running = False
-        print("\n🛑 Exiting service...")
+        print("\nExiting service...")
     
     def run(self):
         """Start the keyboard monitoring service"""
@@ -3629,7 +3630,7 @@ class SmartKeyboardService:
         # Start mouse listener to detect clicks on underlined words
         mouse_listener = mouse.Listener(on_click=self.on_mouse_click)
         mouse_listener.start()
-        print("🖱️ Mouse click detection enabled - click on underlined words to see suggestions")
+        print("Mouse click detection enabled - click on underlined words to see suggestions")
         
         # Add periodic check to keep UI responsive
         def check_running():
@@ -3651,7 +3652,7 @@ class SmartKeyboardService:
         try:
             self.popup.root.mainloop()  # keep Tkinter UI active
         except Exception as e:
-            print(f"\n⚠️ Service stopped: {e}")
+            print(f"\nService stopped: {e}")
         finally:
             self.running = False
             # Clean up all persistent underlines
@@ -3660,22 +3661,22 @@ class SmartKeyboardService:
                 listener.stop()
             if mouse_listener.running:
                 mouse_listener.stop()
-            print("\n✅ Service stopped successfully\n")
+            print("\nService stopped successfully\n")
     
     def cleanup_all_underlines(self):
         """Remove all persistent underlines when service stops"""
-        print(f"\n🧹 Cleaning up {len(self.misspelled_words)} persistent underlines...")
+        print(f"\nCleaning up {len(self.misspelled_words)} persistent underlines...")
         
         # Clear Grammarly-style overlay
         try:
             self.underline_overlay.clear_all_underlines()
         except Exception as e:
-            print(f"⚠️ Error clearing overlay: {e}")
+            print(f"Error clearing overlay: {e}")
         self.active_overlay_hwnd = None
         
         with self.underline_lock:
             self.misspelled_words.clear()
-        print("✅ All underlines cleaned up")
+        print("All underlines cleaned up")
 
 
 def main():
@@ -3689,13 +3690,13 @@ def main():
         pass
     
     try:
-        print("\n🎯 Starting Kannada Smart Keyboard Service...")
+        print("\nStarting Kannada Smart Keyboard Service...")
         print("   Loading NLP models...\n")
         service = SmartKeyboardService()
         service.run()
     except Exception as e:
         import traceback
-        print(f"❌ Fatal Error: {e}")
+        print(f"Fatal Error: {e}")
         traceback.print_exc()
         sys.exit(1)
 
