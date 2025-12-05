@@ -406,6 +406,7 @@ class SmartKeyboardService:
         self.last_paste_anchor = None  # Snapshot of caret/window state before paste
         self.select_all_active = False  # Track if Ctrl+A was just pressed
         self.ctrl_held = False  # Track if Ctrl key is currently held down
+        self._menu_paste_candidate: Optional[dict] = None  # Snapshot for context menu paste detection
         self.default_text_margin_px = self.dpi.px(18)
         self.default_baseline_offset_px = self.dpi.px(32)
         self.default_line_height_px = max(self.dpi.px(28), 16)
@@ -1618,17 +1619,24 @@ class SmartKeyboardService:
     
     def on_mouse_click(self, x, y, button, pressed):
         """Handle mouse clicks to detect clicks on underlined words"""
+        if button == Button.right:
+            if pressed:
+                self._prepare_mouse_paste_candidate()
+            return
+
         if button != Button.left:
             return
 
         if self.current_interface == "Microsoft Word" and Dispatch is not None:
             if pressed:
                 return
+            self._maybe_trigger_mouse_paste_check()
             time.sleep(0.05)
             self._handle_word_click()
             return
 
         if not pressed:
+            self._maybe_trigger_mouse_paste_check()
             return
         
         # Small delay to let caret position update
@@ -2448,6 +2456,125 @@ class SmartKeyboardService:
         snapshot = self._capture_live_geometry()
         if snapshot:
             self.last_paste_anchor = snapshot
+
+    def _prepare_mouse_paste_candidate(self):
+        """Capture document state ahead of a potential context-menu paste."""
+        try:
+            geometry = self._capture_live_geometry()
+            if geometry:
+                self.last_paste_anchor = geometry
+
+            before_text = self.get_document_text() or ""
+            caret_index = self._get_caret_char_index()
+
+            self._menu_paste_candidate = {
+                'timestamp': time.time(),
+                'before_text': before_text,
+                'caret_index': caret_index,
+                'geometry': geometry,
+            }
+            print("🖱️ Context menu snapshot captured for paste candidate")
+        except Exception as exc:
+            print(f"⚠️ Unable to prepare mouse paste snapshot: {exc}")
+            self._menu_paste_candidate = None
+
+    def _maybe_trigger_mouse_paste_check(self):
+        """Schedule a paste scan when a context-menu selection just finished."""
+        candidate = self._menu_paste_candidate
+        if not candidate:
+            return
+
+        if time.time() - candidate.get('timestamp', 0) > 5.0:
+            self._menu_paste_candidate = None
+            return
+
+        self._menu_paste_candidate = None
+
+        def run_evaluation():
+            self._evaluate_mouse_paste_candidate(candidate)
+
+        timer = threading.Timer(0.25, run_evaluation)
+        timer.daemon = True
+        timer.start()
+
+    def _evaluate_mouse_paste_candidate(self, candidate: dict):
+        """Compare document text before/after to confirm a mouse-driven paste."""
+        if not candidate:
+            return
+
+        if not self.enabled or self.replacing:
+            return
+
+        if time.time() - candidate.get('timestamp', 0) > 5.0:
+            return
+
+        before_text = candidate.get('before_text') or ""
+        try:
+            after_text = self.get_document_text() or ""
+        except Exception as exc:
+            print(f"⚠️ Unable to capture document text for paste confirmation: {exc}")
+            return
+
+        if after_text == before_text:
+            return
+
+        inserted, removed = self._extract_inserted_segment(before_text, after_text)
+        if not inserted.strip():
+            return
+
+        words = self.extract_words_from_text(inserted)
+        if not words:
+            return
+
+        geometry = candidate.get('geometry')
+        if geometry:
+            self.last_paste_anchor = geometry
+        elif not self.last_paste_anchor:
+            self.capture_paste_anchor()
+
+        clipboard_text = self.get_clipboard_text()
+        if clipboard_text:
+            self.last_clipboard_content = clipboard_text
+        else:
+            self.last_clipboard_content = inserted
+
+        print("📋 Detected mouse paste - processing underlines")
+        self._start_paste_cooldown(0.8)
+        self.process_pasted_text_for_underlines(inserted)
+
+    def _extract_inserted_segment(self, before: str, after: str) -> Tuple[str, str]:
+        """Return inserted and removed substrings between two document snapshots."""
+        before = before or ""
+        after = after or ""
+
+        if before == after:
+            return "", ""
+
+        len_before = len(before)
+        len_after = len(after)
+        prefix_len = 0
+        max_prefix = min(len_before, len_after)
+        while prefix_len < max_prefix and before[prefix_len] == after[prefix_len]:
+            prefix_len += 1
+
+        suffix_len = 0
+        remaining_before = len_before - prefix_len
+        remaining_after = len_after - prefix_len
+        max_suffix = min(remaining_before, remaining_after)
+        while (
+            suffix_len < max_suffix
+            and before[len_before - 1 - suffix_len] == after[len_after - 1 - suffix_len]
+        ):
+            suffix_len += 1
+
+        start_after = prefix_len
+        end_after = len_after - suffix_len if suffix_len <= len_after - prefix_len else len_after
+        start_before = prefix_len
+        end_before = len_before - suffix_len if suffix_len <= len_before - prefix_len else len_before
+
+        inserted = after[start_after:end_after]
+        removed = before[start_before:end_before]
+        return inserted, removed
 
     def _estimate_line_height(self, hwnd: Optional[int]) -> int:
         """Best-effort line height (pixels) for the target window."""
