@@ -415,7 +415,7 @@ class SmartKeyboardService:
         self.layout_tab_stop_spaces = 4  # Approximate tab stop spacing (Notepad default = 8, but Kannada wider)
         self.layout_min_char_px = max(1, self.dpi.px(6))  # Guard for zero-width glyphs during layout
         self.paste_line_offsets = {
-            0: self.dpi.px(-6),  # Lift first line slightly for tighter alignment
+            0: self.dpi.px(-1),  # Lift first line slightly for tighter alignment
         }
         self.paste_default_line_offset_px = self.dpi.px(-18)  # Fallback shift for any additional lines
         self.paste_line_offset_increment_px = self.dpi.px(4)  # Push lower lines down a touch
