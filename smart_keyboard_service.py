@@ -3182,6 +3182,7 @@ class SmartKeyboardService:
                 # Check if 'v' key is pressed (either as char or vk code)
                 is_v_key = False
                 is_a_key = False
+                is_x_key = False
                 
                 # Try multiple ways to detect the key
                 key_char = None
@@ -3204,6 +3205,8 @@ class SmartKeyboardService:
                     is_v_key = True
                 if key_char == 'a' or key_vk == 65 or key_char == '\x01' or (key_name and "'a'" in key_name):
                     is_a_key = True
+                if key_char == 'x' or key_vk == 88 or key_char == '\x18' or (key_name and "'x'" in key_name):
+                    is_x_key = True
                 
                 if is_v_key:
                     self._start_paste_cooldown(0.8)
@@ -3217,6 +3220,18 @@ class SmartKeyboardService:
                     # Ctrl+A detected - mark select-all active
                     self.select_all_active = True
                     print(f"Ctrl+A detected - select all active (interface: {self.current_interface})")
+
+                if is_x_key:
+                    triggered_via_ctrl = self.select_all_active
+                    if self._should_clear_select_all():
+                        reason = "Ctrl+A" if triggered_via_ctrl else "Selection"
+                        print(f"{reason} + Ctrl+X detected - clearing all underlines (interface: {self.current_interface})")
+                        self._clear_all_underlines_notepad()
+                        self.select_all_active = False
+                        if self.popup.visible:
+                            self.popup.hide()
+                    else:
+                        self._schedule_document_empty_check()
             
             if key in (Key.backspace, Key.esc) and self.just_replaced_word:
                 self.just_replaced_word = False
