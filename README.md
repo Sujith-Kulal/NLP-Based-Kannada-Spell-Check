@@ -108,7 +108,7 @@ The system runs as a background Windows service and continuously monitors:
 
 ---
 
-### **2.2.3 Grammarly-Style Underline Overlay Engine**
+### **2.2.3 Underline Overlay Engine**
 
 * Renders a transparent overlay on top of any editor
 * Tracks caret position using UIAutomation
